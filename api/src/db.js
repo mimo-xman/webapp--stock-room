@@ -12,11 +12,16 @@ async function connectDb() {
   }
   mongoose.set('strictQuery', true);
 
-  mongoose.connection.on('connected', () => logger.log('[db] connected'));
+  mongoose.connection.on('connected', () =>
+    logger.log(`[db] connected — db: ${CONFIG.MONGO_DB_NAME}`)
+  );
   mongoose.connection.on('error', (e) => logger.error('[db] error:', e.message));
   mongoose.connection.on('disconnected', () => logger.warn('[db] disconnected'));
 
   await mongoose.connect(CONFIG.MONGODB_URI, {
+    // Explicit DB name — overrides any db present in the URI path,
+    // so MONGODB_URI can stay a bare Atlas cluster link.
+    dbName: CONFIG.MONGO_DB_NAME,
     serverSelectionTimeoutMS: 10000,
     autoIndex: true, // keep indexes in sync on free tier without migrations
   });

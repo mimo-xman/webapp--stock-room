@@ -48,7 +48,8 @@ Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de p
 1. Crée un cluster M0 sur [mongodb.com/atlas](https://www.mongodb.com/atlas).
 2. Database Access : un utilisateur + mot de passe.
 3. Network Access : `0.0.0.0/0` (Render n'a pas d'IP fixe en free tier).
-4. Récupère l'URI : `mongodb+srv://<user>:<pass>@<cluster>/?retryWrites=true&w=majority`.
+4. Récupère l'URI : `mongodb+srv://<user>:<pass>@<cluster>/?retryWrites=true&w=majority`
+   (lien seul — le nom de la base se règle à part via `MONGO_DB_NAME`, défaut `adobe-stock`).
 
 ### 2. API — Render
 
@@ -60,7 +61,8 @@ Variables d'environnement à définir :
 
 | Variable | Valeur |
 |---|---|
-| `MONGODB_URI` | l'URI Atlas ci-dessus |
+| `MONGODB_URI` | l'URI Atlas ci-dessus (lien seul, sans base) |
+| `MONGO_DB_NAME` | optionnel — nom de la base, **séparé** de l'URI (défaut : `adobe-stock`, ou la base de l'URI si présente) |
 | `API_KEY` | clé de l'agent — `openssl rand -hex 24` |
 | `APP_PASSWORD` | le mot de passe de la webapp |
 | `CORS_ORIGINS` | l'URL Netlify de la webapp (ex. `https://stockroom.netlify.app`) — ou `*` |

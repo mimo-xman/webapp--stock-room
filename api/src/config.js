@@ -18,6 +18,25 @@ function listEnv(name, fallback) {
     .filter(Boolean);
 }
 
+// Database name in the URI path (e.g. mongodb+srv://…/<db>?…) — may be empty.
+function dbNameFromUri(uri) {
+  if (!uri) return '';
+  try {
+    const p = decodeURIComponent(new URL(uri).pathname || '');
+    return p.replace(/^\/+/, '').split('/')[0] || '';
+  } catch {
+    return '';
+  }
+}
+
+// The DB name is fully SEPARATE from MONGODB_URI (Atlas link without any db works).
+// Priority: MONGO_DB_NAME > MONGODB_DB_NAME (alias) > db in URI path > 'adobe-stock'.
+const MONGO_DB_NAME =
+  process.env.MONGO_DB_NAME ||
+  process.env.MONGODB_DB_NAME ||
+  dbNameFromUri(process.env.MONGODB_URI) ||
+  'adobe-stock';
+
 const CONFIG = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   VERSION: pkg.version,
@@ -25,6 +44,8 @@ const CONFIG = {
 
   // ── persistence ──
   MONGODB_URI: process.env.MONGODB_URI || '',
+  // DB name, separate from the URI — set MONGO_DB_NAME if needed (see .env.example).
+  MONGO_DB_NAME,
 
   // ── auth (dual credential) ──
   // X-API-Key       → for the AI agent that writes generation results

@@ -63,4 +63,5 @@ Error codes: `VALIDATION_ERROR` (400), `AUTH_REQUIRED` (401), `NOT_FOUND` (404),
 
 `render.yaml` at the repo root is a ready blueprint (root dir `api`, health check `/health`).
 Required env vars: `MONGODB_URI`, `API_KEY`, `APP_PASSWORD`, plus `CORS_ORIGINS` set to the
-Netlify URL of the web app.
+Netlify URL of the web app. Optional `MONGO_DB_NAME` selects the database separately from
+the URI (default `adobe-stock`, or the db found in the URI path).
