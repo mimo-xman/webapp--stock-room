@@ -312,6 +312,130 @@ async function main() {
     r = await call('GET', `/api/images/${dl}/download`, { key: API_KEY });
     ok('download dead link → 502 BAD_GATEWAY', r.status === 502 && r.json.error.code === 'BAD_GATEWAY');
 
+    // ── upscales ────────────────────────────────────────────────────────────
+    console.log('─ upscales');
+    const mkUpscale = (over = {}) => ({
+      url: `http://127.0.0.1:${fakeImgPort}/img.png`,
+      public_id: 'adobe-stock/upscales/test_x4',
+      scale: 4,
+      model: 'RealESRGAN_x4plus',
+      width: 4096, height: 4096, size_bytes: 12345,
+      source: 'github-actions', run_id: '9876543210',
+      ...over,
+    });
+
+    r = await call('POST', '/api/images', {
+      key: API_KEY,
+      body: mkImage(70, s1, { title: 'Upscale probe asset number one', image_link: `http://127.0.0.1:${fakeImgPort}/img.png` }),
+    });
+    const up = r.json.data._id;
+
+    r = await call('POST', `/api/images/${up}/upscales`, { key: API_KEY, body: mkUpscale() });
+    ok('POST upscale → 201 + entry with _id', r.status === 201 && r.json.data.upscales.length === 1 && r.json.data.upscales[0]._id, r.json);
+    const uid1 = r.json.data.upscales[0]._id;
+
+    ok('POST upscale stores model/scale/run_id', r.json.data.upscales[0].model === 'RealESRGAN_x4plus' && r.json.data.upscales[0].scale === 4 && r.json.data.upscales[0].run_id === '9876543210');
+
+    r = await call('POST', `/api/images/${up}/upscales`, {
+      key: API_KEY,
+      body: mkUpscale({ max_upscales: 1, url: 'http://127.0.0.1:1/x.png' }),
+    });
+    ok('POST beyond caller max_upscales → 409 UPSCALE_LIMIT_REACHED',
+      r.status === 409 && r.json.error.code === 'UPSCALE_LIMIT_REACHED' && /already has 1 upscale/.test(r.json.error.message), r.json);
+
+    r = await call('POST', `/api/images/${up}/upscales`, { key: API_KEY, body: mkUpscale({ scale: 1 }) });
+    ok('POST scale=1 → 400 VALIDATION_ERROR', r.status === 400 && r.json.error.code === 'VALIDATION_ERROR');
+
+    r = await call('POST', `/api/images/${up}/upscales`, { key: API_KEY, body: mkUpscale({ url: 'ftp://nope/x.png' }) });
+    ok('POST non-http url → 400', r.status === 400);
+
+    r = await call('POST', '/api/images/000000000000000000000000/upscales', { key: API_KEY, body: mkUpscale() });
+    ok('POST upscale on missing image → 404', r.status === 404 && r.json.error.code === 'NOT_FOUND');
+
+    // server default cap (env not set in this test → CONFIG.MAX_UPSCALES_PER_IMAGE=10)
+    for (let i = 0; i < 8; i += 1) {
+      await call('POST', `/api/images/${up}/upscales`, { key: API_KEY, body: mkUpscale() });
+    }
+    r = await call('GET', `/api/images/${up}`, { key: API_KEY });
+    ok('9 upscales stored so far', r.json.data.upscales.length === 9, r.json.data.upscales && r.json.data.upscales.length);
+    r = await call('POST', `/api/images/${up}/upscales`, { key: API_KEY, body: mkUpscale() });
+    ok('10th upscale stored (server default cap)', r.status === 201 && r.json.data.upscales.length === 10);
+    r = await call('POST', `/api/images/${up}/upscales`, { key: API_KEY, body: mkUpscale() });
+    ok('11th upscale → 409 (server default cap)', r.status === 409 && r.json.error.code === 'UPSCALE_LIMIT_REACHED');
+
+    // PATCH (mark used / unmark)
+    r = await call('PATCH', `/api/images/${up}/upscales/${uid1}`, { password: APP_PASSWORD, body: { used_in_adobe_stock: true } });
+    ok('PATCH upscale mark used (app password) → 200', r.status === 200 && r.json.data.upscales.find((u) => u._id === uid1).used_in_adobe_stock === true);
+
+    r = await call('PATCH', `/api/images/${up}/upscales/${uid1}`, { password: APP_PASSWORD, body: { used_in_adobe_stock: false } });
+    ok('PATCH upscale unmark → 200', r.status === 200 && r.json.data.upscales.find((u) => u._id === uid1).used_in_adobe_stock === false);
+
+    r = await call('PATCH', `/api/images/${up}/upscales/000000000000000000000000`, { password: APP_PASSWORD, body: { used_in_adobe_stock: true } });
+    ok('PATCH unknown upscale → 404 UPSCALE_NOT_FOUND', r.status === 404 && r.json.error.code === 'UPSCALE_NOT_FOUND');
+
+    r = await call('PATCH', `/api/images/${up}/upscales/${uid1}`, { password: APP_PASSWORD, body: {} });
+    ok('PATCH upscale empty body → 400', r.status === 400);
+
+    // listing filters
+    r = await call('GET', '/api/images?limit=100&has_upscales=true', K);
+    ok('filter has_upscales=true → only the probe image', r.json.data.length === 1 && r.json.data[0]._id === up, r.json.data && r.json.data.length);
+
+    r = await call('GET', '/api/images?limit=100&has_upscales=false', K);
+    ok('filter has_upscales=false → all others', r.json.data.length === 17 && r.json.data.every((d) => d._id !== up), r.json.data && r.json.data.length);
+
+    r = await call('GET', '/api/images?limit=100&upscales_lt=2', K);
+    ok('filter upscales_lt=2 → 17 (0 upscales, probe excluded)', r.json.data.length === 17 && r.json.data.every((d) => d._id !== up), r.json.data && r.json.data.length);
+
+    r = await call('GET', '/api/images?limit=100&upscales_lt=11', K);
+    ok('filter upscales_lt=11 → 18 (probe included)', r.json.data.length === 18, r.json.data && r.json.data.length);
+
+    r = await call('GET', '/api/images?limit=100&upscales_lt=abc', K);
+    ok('bad upscales_lt → 400', r.status === 400 && r.json.error.details[0].path === 'upscales_lt');
+
+    r = await call('GET', '/api/images?limit=100&has_upscales=maybe', K);
+    ok('bad has_upscales → 400', r.status === 400 && r.json.error.details[0].path === 'has_upscales');
+
+    r = await call('GET', '/api/images?limit=100&has_upscales=true&upscales_lt=5', K);
+    ok('both upscale filters → 400 (mutually exclusive)', r.status === 400);
+
+    // download upscale (proxy)
+    const dlUp = await fetch(`${BASE}/api/images/${up}/upscales/${uid1}/download`, { headers: { 'X-API-Key': API_KEY } });
+    const upBuf = Buffer.from(await dlUp.arrayBuffer());
+    ok('download upscale → 200 png + filename _x4',
+      dlUp.status === 200 &&
+      dlUp.headers.get('content-type') === 'image/png' &&
+      /_x4\.png/.test(dlUp.headers.get('content-disposition') || '') &&
+      upBuf[0] === 0x89,
+      { cd: dlUp.headers.get('content-disposition') });
+
+    r = await call('GET', `/api/images/${up}/upscales/000000000000000000000000/download`, { key: API_KEY });
+    ok('download unknown upscale → 404 UPSCALE_NOT_FOUND', r.status === 404 && r.json.error.code === 'UPSCALE_NOT_FOUND');
+
+    // 502 path: dead upscale url
+    r = await call('POST', '/api/images', {
+      key: API_KEY,
+      body: mkImage(71, s1, { title: 'Upscale dead link probe asset', image_link: `http://127.0.0.1:${fakeImgPort}/img.png` }),
+    });
+    const upDead = r.json.data._id;
+    r = await call('POST', `/api/images/${upDead}/upscales`, { key: API_KEY, body: mkUpscale({ url: `http://127.0.0.1:${fakeImgPort}/missing.png` }) });
+    const deadUid = r.json.data.upscales[0]._id;
+    r = await call('GET', `/api/images/${upDead}/upscales/${deadUid}/download`, { key: API_KEY });
+    ok('download dead upscale link → 502 BAD_GATEWAY', r.status === 502 && r.json.error.code === 'BAD_GATEWAY');
+
+    // DELETE upscale (Cloudinary not configured here → DB-only, reported clearly)
+    r = await call('DELETE', `/api/images/${upDead}/upscales/${deadUid}`, { password: APP_PASSWORD });
+    ok('DELETE upscale → 200 + cloudinary note (not configured)',
+      r.status === 200 && r.json.data.deleted === true && r.json.data.upscalesRemaining === 0 &&
+      r.json.data.cloudinary && r.json.data.cloudinary.destroyed === false,
+      r.json);
+
+    r = await call('DELETE', `/api/images/${upDead}/upscales/${deadUid}`, { password: APP_PASSWORD });
+    ok('DELETE same upscale again → 404 UPSCALE_NOT_FOUND', r.status === 404 && r.json.error.code === 'UPSCALE_NOT_FOUND');
+
+    // cleanup: probe images
+    await call('DELETE', `/api/images/${up}`, { password: APP_PASSWORD });
+    await call('DELETE', `/api/images/${upDead}`, { password: APP_PASSWORD });
+
     // ── CORS preflight ──────────────────────────────────────────────────────
     const pre = await fetch(`${BASE}/api/images`, {
       method: 'OPTIONS',

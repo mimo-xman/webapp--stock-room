@@ -26,6 +26,19 @@ export function slugify(s: string, max = 60): string {
   );
 }
 
+/** Human-readable byte size (1024-based, locale-stable). */
+export function formatBytes(n: number | null | undefined): string {
+  if (!n || n <= 0 || !Number.isFinite(n)) return "—";
+  const units = ["B", "KB", "MB", "GB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+
 export function parseKeywords(raw: string): string[] {
   return [...new Set(
     raw

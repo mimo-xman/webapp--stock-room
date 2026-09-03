@@ -1,8 +1,11 @@
 "use client";
 
 /**
- * Image detail dialog — large preview, all Adobe Stock metadata with
- * quick copy icons, download, stamp toggle, edit, delete.
+ * Image detail dialog — large preview with Original/upscaled variant switch,
+ * all Adobe Stock metadata with quick copy icons, download, stamp toggle,
+ * edit, delete. Upscaled variants (Real-ESRGAN via GitHub Actions) are
+ * listed in the metadata column with per-variant mark-used / download /
+ * delete actions.
  */
 
 import { useState } from "react";
@@ -14,14 +17,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Pencil, Trash2, Download, ImageOff, ArrowRight } from "lucide-react";
+import { Pencil, Trash2, Download, ImageOff, ArrowRight, ZoomIn, ExternalLink } from "lucide-react";
 import { CopyButton } from "./CopyButton";
 import { StampToggle } from "./StampToggle";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { api } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import { formatBytes, formatDateTime } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
-import type { StockImage } from "@/lib/types";
+import type { StockImage, Upscale } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface ImageDetailDialogProps {
   image: StockImage | null;
@@ -29,8 +33,13 @@ interface ImageDetailDialogProps {
   onToggleUsed: (image: StockImage) => void;
   onEdit: (image: StockImage) => void;
   onDelete: (image: StockImage) => void;
+  /** Notified whenever an upscale mutation returns the updated image,
+   *  so the page can refresh its detail + list state. */
+  onImageUpdate: (image: StockImage) => void;
   sessionTitle?: string;
 }
+
+const VARIANT_ORIGINAL = "original";
 
 export function ImageDetailDialog({
   image,
@@ -38,14 +47,36 @@ export function ImageDetailDialog({
   onToggleUsed,
   onEdit,
   onDelete,
+  onImageUpdate,
   sessionTitle,
 }: ImageDetailDialogProps) {
   const [broken, setBroken] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [variant, setVariant] = useState<string>(VARIANT_ORIGINAL);
+  const [confirmUpscaleDelete, setConfirmUpscaleDelete] = useState<Upscale | null>(null);
+  const [busyUpscaleId, setBusyUpscaleId] = useState<string | null>(null);
+  const [prevId, setPrevId] = useState<string>("");
   const { toast } = useToast();
 
+  // Reset the transient states when the dialog switches to another image
+  // (adjust-state-during-render pattern — same as FilterBar).
+  if (image && prevId !== image._id) {
+    setPrevId(image._id);
+    setVariant(VARIANT_ORIGINAL);
+    setBroken(false);
+  }
+
   if (!image) return null;
+
+  const upscales = image.upscales ?? [];
+  const activeUpscale =
+    variant !== VARIANT_ORIGINAL ? upscales.find((u) => u._id === variant) : undefined;
+
+  const previewSrc = activeUpscale ? activeUpscale.url : image.image_link;
+  const stampVisible = activeUpscale
+    ? Boolean(activeUpscale.used_in_adobe_stock)
+    : image.used_in_adobe_stock;
 
   async function download() {
     setDownloading(true);
@@ -60,32 +91,136 @@ export function ImageDetailDialog({
     }
   }
 
+  async function downloadUpscale(u: Upscale) {
+    setBusyUpscaleId(u._id);
+    try {
+      await api.images.upscales.download(image!, u);
+      toast({
+        title: "Upscaled variant downloaded",
+        description: `×${u.scale} · ${u.width ?? "?"}×${u.height ?? "?"} px saved to your downloads.`,
+      });
+    } catch (e: unknown) {
+      const msg = (e as { payload?: { message?: string } })?.payload?.message || "Could not download this variant.";
+      toast({ variant: "destructive", title: "Download failed", description: msg });
+    } finally {
+      setBusyUpscaleId(null);
+    }
+  }
+
+  async function toggleUpscaleUsed(u: Upscale) {
+    if (!image) return;
+    const next = !u.used_in_adobe_stock;
+
+    // Optimistic update of the parent state, rollback on error.
+    const updated = {
+      ...image,
+      upscales: upscales.map((x) => (x._id === u._id ? { ...x, used_in_adobe_stock: next } : x)),
+    };
+    onImageUpdate(updated);
+    try {
+      const res = await api.images.upscales.update(image._id, u._id, { used_in_adobe_stock: next });
+      onImageUpdate(res.data);
+    } catch (e: unknown) {
+      onImageUpdate(image); // rollback
+      const msg = (e as { payload?: { message?: string } })?.payload?.message || "The stamp was not applied.";
+      toast({ variant: "destructive", title: "Update failed", description: msg });
+    }
+  }
+
+  async function deleteUpscale(u: Upscale) {
+    if (!image) return;
+    setBusyUpscaleId(u._id);
+    try {
+      await api.images.upscales.remove(image._id, u._id);
+      const updated = { ...image, upscales: upscales.filter((x) => x._id !== u._id) };
+      if (variant === u._id) setVariant(VARIANT_ORIGINAL);
+      onImageUpdate(updated);
+      toast({ title: "Upscaled variant deleted", description: `×${u.scale} variant removed from the image.` });
+    } catch (e: unknown) {
+      const msg = (e as { payload?: { message?: string } })?.payload?.message || "Try again in a moment.";
+      toast({ variant: "destructive", title: "Delete failed", description: msg });
+    } finally {
+      setBusyUpscaleId(null);
+      setConfirmUpscaleDelete(null);
+    }
+  }
+
   return (
     <Dialog open={!!image} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="gap-0 rounded-none border-ink bg-surface p-0 shadow-[var(--shadow-hard)] sm:max-w-4xl">
         <div className="grid max-h-[85vh] overflow-hidden md:grid-cols-[minmax(0,1.35fr)_minmax(300px,1fr)]">
           {/* preview */}
-          <div className="relative flex items-center justify-center border-b border-line bg-muted md:border-b-0 md:border-r">
-            {broken ? (
-              <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-2 text-ink-muted">
-                <ImageOff className="h-8 w-8" aria-hidden />
-                <span className="font-mono text-[11px] uppercase tracking-wider">
-                  image link unreachable
+          <div className="relative flex flex-col border-b border-line bg-muted md:border-b-0 md:border-r">
+            <div className="flex flex-1 items-center justify-center">
+              {broken ? (
+                <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-2 text-ink-muted">
+                  <ImageOff className="h-8 w-8" aria-hidden />
+                  <span className="font-mono text-[11px] uppercase tracking-wider">
+                    {activeUpscale ? "upscale link unreachable" : "image link unreachable"}
+                  </span>
+                </div>
+              ) : (
+                <img
+                  key={previewSrc}
+                  src={previewSrc}
+                  alt={activeUpscale ? `${image.title} — upscaled ×${activeUpscale.scale}` : image.title}
+                  onError={() => setBroken(true)}
+                  className="max-h-[42vh] w-full object-contain md:max-h-[62vh]"
+                />
+              )}
+              {stampVisible && (
+                <span className="stamp stamp-thunk pointer-events-none absolute" data-testid="detail-stamp">
+                  Used · Adobe Stock
                 </span>
+              )}
+            </div>
+
+            {/* Original / upscaled variant switcher */}
+            {upscales.length > 0 && (
+              <div
+                className="flex flex-wrap items-center gap-1.5 border-t border-line bg-paper p-2"
+                role="tablist"
+                aria-label="Image variants"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={variant === VARIANT_ORIGINAL}
+                  onClick={() => {
+                    setVariant(VARIANT_ORIGINAL);
+                    setBroken(false);
+                  }}
+                  className={cn(
+                    "chip border-line-strong transition-colors focus-visible:outline-2 focus-visible:outline-brand",
+                    variant === VARIANT_ORIGINAL
+                      ? "border-ink bg-ink text-paper"
+                      : "bg-surface text-ink hover:border-ink"
+                  )}
+                >
+                  Original
+                </button>
+                {upscales.map((u) => (
+                  <button
+                    key={u._id}
+                    type="button"
+                    role="tab"
+                    aria-selected={variant === u._id}
+                    title={`×${u.scale} · ${u.model} · ${u.width ?? "?"}×${u.height ?? "?"} px`}
+                    onClick={() => {
+                      setVariant(u._id);
+                      setBroken(false);
+                    }}
+                    className={cn(
+                      "chip border-line-strong transition-colors focus-visible:outline-2 focus-visible:outline-brand",
+                    variant === u._id
+                        ? "border-ink bg-ink text-paper"
+                        : "bg-surface text-ink hover:border-ink"
+                    )}
+                  >
+                    <ZoomIn className="mr-1 inline h-3 w-3" aria-hidden />×{u.scale}
+                  </button>
+                ))}
               </div>
-            ) : (
-              <img
-                key={image.image_link}
-                src={image.image_link}
-                alt={image.title}
-                onError={() => setBroken(true)}
-                className="max-h-[42vh] w-full object-contain md:max-h-[70vh]"
-              />
-            )}
-            {image.used_in_adobe_stock && (
-              <span className="stamp stamp-thunk pointer-events-none absolute" data-testid="detail-stamp">
-                Used · Adobe Stock
-              </span>
             )}
           </div>
 
@@ -100,6 +235,11 @@ export function ImageDetailDialog({
                 <span className="chip border-line-strong text-ink">{image.category}</span>
                 <span className="chip">{image.quality}</span>
                 <span className="chip">{image.ratio}</span>
+                {upscales.length > 0 && (
+                  <span className="chip border-brand/60 text-brand" title={`${upscales.length} upscaled variant(s)`}>
+                    <ZoomIn className="mr-1 inline h-3 w-3" aria-hidden />×{upscales.length}
+                  </span>
+                )}
                 <CopyButton value={image.title} label="title" className="ml-1" />
                 <CopyButton value={image.category} label="category" />
               </div>
@@ -130,6 +270,94 @@ export function ImageDetailDialog({
                 </p>
               </section>
 
+              {/* ── upscaled variants ── */}
+              <section>
+                <h4 className="eyebrow">Upscales ({upscales.length})</h4>
+                {upscales.length === 0 ? (
+                  <p className="mt-1.5 border border-line bg-paper p-2.5 font-mono text-[11px] leading-relaxed text-ink-muted">
+                    No upscaled variant yet — the daily GitHub Actions job adds Real-ESRGAN
+                    upscales here automatically (see docs/UPSCALE.md).
+                  </p>
+                ) : (
+                  <ul className="mt-1.5 space-y-1.5">
+                    {upscales.map((u) => (
+                      <li
+                        key={u._id}
+                        className={cn(
+                          "border bg-paper p-2.5",
+                          variant === u._id ? "border-ink" : "border-line"
+                        )}
+                      >
+                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono text-[11.5px]">
+                          <span className="font-semibold text-ink">×{u.scale}</span>
+                          <span className="text-ink-muted">{u.model}</span>
+                          <span className="text-ink-muted">
+                            {u.width && u.height ? `${u.width}×${u.height} px` : "—"}
+                          </span>
+                          <span className="text-ink-muted">{formatBytes(u.size_bytes)}</span>
+                        </div>
+                        <div className="mt-0.5 font-mono text-[10.5px] text-ink-muted">
+                          {formatDateTime(u.created_at)}
+                          {u.run_id ? ` · run ${u.run_id}` : ""}
+                          {u.source ? ` · ${u.source}` : ""}
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVariant(u._id);
+                              setBroken(false);
+                            }}
+                            className="flex h-[26px] items-center gap-1 border border-line-strong bg-surface px-2 font-display text-[10.5px] font-semibold uppercase tracking-wider text-ink transition-colors hover:border-ink focus-visible:outline-2 focus-visible:outline-brand"
+                            aria-label={`View the ×${u.scale} variant in the preview`}
+                          >
+                            <ZoomIn className="h-3 w-3" aria-hidden />
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => downloadUpscale(u)}
+                            disabled={busyUpscaleId === u._id}
+                            className="flex h-[26px] items-center gap-1 border border-line-strong bg-surface px-2 font-display text-[10.5px] font-semibold uppercase tracking-wider text-ink transition-colors hover:border-ink disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-brand"
+                            aria-label={`Download the ×${u.scale} variant`}
+                          >
+                            <Download className="h-3 w-3" aria-hidden />
+                            {busyUpscaleId === u._id ? "…" : "Download"}
+                          </button>
+                          <a
+                            href={u.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex h-[26px] items-center gap-1 border border-line-strong bg-surface px-2 font-display text-[10.5px] font-semibold uppercase tracking-wider text-ink transition-colors hover:border-ink focus-visible:outline-2 focus-visible:outline-brand"
+                            aria-label={`Open the ×${u.scale} variant on Cloudinary`}
+                          >
+                            <ExternalLink className="h-3 w-3" aria-hidden />
+                            Cloudinary
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => toggleUpscaleUsed(u)}
+                            className="ml-auto"
+                            aria-label={`Mark the ×${u.scale} variant as used in Adobe Stock`}
+                          >
+                            <StampToggle used={Boolean(u.used_in_adobe_stock)} small onToggle={() => toggleUpscaleUsed(u)} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmUpscaleDelete(u)}
+                            className="flex h-[26px] items-center gap-1 border border-danger/40 bg-surface px-2 font-display text-[10.5px] font-semibold uppercase tracking-wider text-danger transition-colors hover:border-danger hover:bg-danger-soft focus-visible:outline-2 focus-visible:outline-brand"
+                            aria-label={`Delete the ×${u.scale} variant`}
+                          >
+                            <Trash2 className="h-3 w-3" aria-hidden />
+                            Delete
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
               <section className="space-y-1.5 font-mono text-[11.5px] text-ink-muted">
                 <div className="flex items-center justify-between gap-2">
                   <h4 className="eyebrow">Session</h4>
@@ -157,7 +385,7 @@ export function ImageDetailDialog({
                 className="flex h-[34px] items-center gap-2 bg-brand px-3.5 font-display text-xs font-bold uppercase tracking-widest text-white transition-colors hover:bg-brand-deep disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-brand"
               >
                 <Download className="h-4 w-4" aria-hidden />
-                {downloading ? "Downloading…" : "Download"}
+                {downloading ? "Downloading…" : activeUpscale ? "Download original" : "Download"}
               </button>
               <button
                 type="button"
@@ -190,6 +418,26 @@ export function ImageDetailDialog({
         onConfirm={() => {
           setConfirmDelete(false);
           onDelete(image);
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!confirmUpscaleDelete}
+        onOpenChange={(open) => !open && setConfirmUpscaleDelete(null)}
+        title={`Delete the ×${confirmUpscaleDelete?.scale ?? ""} upscaled variant?`}
+        description={
+          confirmUpscaleDelete
+            ? `The ×${confirmUpscaleDelete.scale} variant (${confirmUpscaleDelete.model}${
+                confirmUpscaleDelete.width && confirmUpscaleDelete.height
+                  ? `, ${confirmUpscaleDelete.width}×${confirmUpscaleDelete.height} px`
+                  : ""
+              }) will be removed from this image. The Cloudinary file is deleted too when the API has Cloudinary credentials configured. The original image is untouched.`
+            : ""
+        }
+        confirmLabel="Delete variant"
+        danger
+        onConfirm={() => {
+          if (confirmUpscaleDelete) deleteUpscale(confirmUpscaleDelete);
         }}
       />
     </Dialog>

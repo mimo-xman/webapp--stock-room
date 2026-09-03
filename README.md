@@ -22,6 +22,12 @@ Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de p
                                         │  WebApp (Netlify)│  mot de passe (APP_PASSWORD)
                                         │  Next.js 16      │  pagination/filtres backend
                                         └──────────────────┘
+
+                                        ┌─────────────────────────────────┐
+                                        │  GitHub Actions (quotidien 08:00 │
+                                        │  Maroc) — Real-ESRGAN upscales  │
+                                        │  → Cloudinary → upscales[]       │
+                                        └─────────────────────────────────┘
 ```
 
 ## Aperçu de la webapp
@@ -37,9 +43,11 @@ Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de p
 
 | Chemin | Contenu | Hébergement |
 |---|---|---|
-| `api/` | API Node.js + Express + Mongoose (Sessions/Images, auth double, validation zod, rate limit, pagination/search/filter/sort backend, proxy download, cascade delete) | **Render** (runtime Node) |
-| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used · Adobe Stock », copy icons, modales custom) | **Netlify** |
+| `api/` | API Node.js + Express + Mongoose (Sessions/Images, auth double, validation zod, rate limit, pagination/search/filter/sort backend, proxy download, cascade delete, **upscales** : endpoints + filtres + cap serveur) | **Render** (runtime Node) |
+| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used · Adobe Stock », copy icons, modales custom, **affichage des upscales** : preview Original/×N, Mark used / Download / Delete) | **Netlify** |
 | `AGENT_PROMPT.md` | **Le prompt réutilisable** à donner à l'agent (variables à remplacer + prompt Lyra inclus verbatim) | — |
+| `.github/workflows/` | **Jobs d'upscale Real-ESRGAN** : batch quotidien 08:00 Maroc + job manuel image unique | **GitHub Actions** |
+| `scripts/upscale/` | Scripts Python partagés des jobs (API client, Cloudinary, Real-ESRGAN) | — |
 
 ## Déploiement
 
@@ -87,6 +95,24 @@ génération → session → enregistrement → rapport. La webapp te permet ens
 trier, filtrer, copier les métadonnées (titre / catégorie / keywords), télécharger les images
 et marquer ce qui a été uploadé sur Adobe Stock (tampon vert).
 
+### 5. Upscales — Real-ESRGAN via GitHub Actions
+
+Les images générées en 1K/2K sont agrandies (×2/×4) par **Real-ESRGAN** dans deux workflows :
+
+- **`Upscale — batch`** — tous les jours à **08:00 Maroc** : prend toutes les images dont le
+  nombre d'upscales est **<** `MAX_NUMBER_OF_UPSCALES_PER_IMAGE` (secret, **défaut 1**),
+  les plus anciennes d'abord, puis download → upscale → **upload Cloudinary** →
+  enregistrement sur l'image (`upscales[]` : url, datetime, scale, modèle, dimensions,
+  taille, run id). Exécution manuelle possible avec les mêmes inputs surchargeant les secrets.
+- **`Upscale — single image`** — manuel : prend un `image_id` en input, vérifie qu'il existe
+  (message clair sinon), vérifie le nombre d'upscales < max (stop propre sinon), puis traite.
+
+Dans la webapp : section *Upscales* dans le détail d'une image — preview commutable
+Original/×N et actions **Mark used / Download / Delete** par variante, chip `×n` sur les
+cartes, filtre « With/Without upscales ».
+
+➡️ **Guide complet (secrets, inputs, formats, erreurs, quota) : [`docs/UPSCALE.md`](docs/UPSCALE.md)**
+
 ## Règle métier absolue
 
 **Aucun être vivant dans les images générées** (ni humains, ni animaux — silhouettes et
@@ -105,7 +131,7 @@ cd web && npm install && npm run dev
 # Démo visuelle : API + 2 sessions + 16 images pré-remplies
 cd api && node scripts/seed-demo.cjs
 
-# Tests E2E de l'API (56 assertions)
+# Tests E2E de l'API (81 assertions)
 cd api && npm test
 ```
 
@@ -122,6 +148,10 @@ cd api && npm test
 
 ## Notes / limites connues
 
+- **Upscales & liens éphémères** : le job d'upscale télécharge l'originale via le proxy de
+  l'API — une image dont le lien serveur a expiré (spin-down) est ignorée avec un message
+  clair ; une image avec URL Cloudinary reste toujours éligible. Voir
+  [`docs/UPSCALE.md`](docs/UPSCALE.md) § 10.
 - **Persistance des `image_link`** : l'API de génération peut uploader chaque image sur
   Cloudinary (`result.cloudinaryUrl`, URL permanente). Si Cloudinary n'est pas/plus configuré
   sur ce service, l'agent stocke l'URL serveur (`/files/…?apiKey=…`) qui est **éphémère**
@@ -134,7 +164,9 @@ cd api && npm test
 
 ## Stack
 
-API : Node 18+, Express 4, Mongoose 8, zod 3, express-rate-limit 7, helmet 8.
+API : Node 18+, Express 4, Mongoose 8, zod 3, express-rate-limit 7, helmet 8, cloudinary 2
+(destroy optionnel).
 WebApp : Next.js 16 (App Router), TypeScript, Tailwind CSS 4, shadcn/ui, Radix, lucide-react.
+Upscales : GitHub Actions + Python (PyTorch CPU, Real-ESRGAN, cloudinary-py).
 Design : « Stockroom » — papier/encre/orange sécurité, Barlow Semi Condensed + Barlow + IBM
 Plex Mono, signature = tampon « USED · ADOBE STOCK ».

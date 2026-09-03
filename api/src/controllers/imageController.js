@@ -1,17 +1,18 @@
 /**
- * Image controller — CRUD + advanced listing + download proxy.
+ * Image controller — CRUD + advanced listing + download proxy + upscales.
  */
 const { Readable } = require('node:stream');
 const Image = require('../models/Image');
 const Session = require('../models/Session');
 const { CONFIG } = require('../config');
-const { IMAGE_SORT_FIELDS, ADOBE_CATEGORIES, MONGODB_OBJECT_ID_RE } = require('../constants');
+const { IMAGE_SORT_FIELDS, ADOBE_CATEGORIES, MONGODB_OBJECT_ID_RE, UPSCALE_HARD_MAX } = require('../constants');
 const {
   escapeRegex,
   parseCommonQuery,
   exactFilter,
   paginationMeta,
 } = require('../utils/listQuery');
+const { destroyAsset } = require('../utils/cloudinary');
 const { HttpError } = require('../middleware/errorHandler');
 
 function badRequest(res, problems) {
@@ -33,7 +34,7 @@ function toPlain(doc) {
   };
 }
 
-/** Parse image-specific filters (session_id, category, used, quality, ratio). */
+/** Parse image-specific filters (session_id, category, used, quality, ratio, upscales). */
 function parseImageFilters(query) {
   const problems = [];
   const filters = {};
@@ -65,6 +66,34 @@ function parseImageFilters(query) {
 
   const f5 = exactFilter(query.ratio, 'ratio', null);
   if (f5.value !== undefined) filters.ratio = f5.value;
+
+  // ── upscale filters (mutually exclusive — both write filters.$expr) ──
+  // has_upscales=true|false : images with / without upscale variants (webapp).
+  // upscales_lt=N          : images with FEWER than N upscales — eligibility
+  //                          query used by the daily batch job.
+  if (query.has_upscales !== undefined && query.has_upscales !== '' &&
+      query.upscales_lt !== undefined && query.upscales_lt !== '') {
+    problems.push({ path: 'has_upscales', message: 'has_upscales and upscales_lt are mutually exclusive — use one or the other' });
+  } else {
+    if (query.has_upscales !== undefined && query.has_upscales !== '') {
+      const v = String(query.has_upscales).toLowerCase();
+      if (v === 'true' || v === 'false') {
+        const size = { $size: { $ifNull: ['$upscales', []] } };
+        filters.$expr = v === 'true' ? { $gt: [size, 0] } : { $eq: [size, 0] };
+      } else {
+        problems.push({ path: 'has_upscales', message: 'has_upscales must be "true" or "false"' });
+      }
+    }
+
+    if (query.upscales_lt !== undefined && query.upscales_lt !== '') {
+      const n = parseInt(query.upscales_lt, 10);
+      if (!Number.isInteger(n) || n < 0 || n > 100) {
+        problems.push({ path: 'upscales_lt', message: 'upscales_lt must be an integer between 0 and 100' });
+      } else {
+        filters.$expr = { $lt: [{ $size: { $ifNull: ['$upscales', []] } }, n] };
+      }
+    }
+  }
 
   return { problems, filters };
 }
@@ -252,4 +281,205 @@ async function download(req, res, next) {
   }
 }
 
-module.exports = { list, create, getOne, update, remove, download };
+// ── upscales (Real-ESRGAN derivatives registered by GitHub Actions) ─────────
+
+/**
+ * POST /api/images/:id/upscales
+ * Register one upscaled variant on the image (called by the upscale job).
+ * Body: { url, public_id?, scale, model, width?, height?, size_bytes?,
+ *         source?, run_id?, max_upscales? }
+ * `max_upscales` = the caller's policy (repo secret) — the request is refused
+ * with a clear 409 once the image already holds that many upscales.
+ */
+async function addUpscale(req, res, next) {
+  try {
+    const { max_upscales, ...entry } = req.validated;
+
+    const image = await Image.findById(req.params.id);
+    if (!image) {
+      throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
+    }
+
+    // Effective policy: the caller's max when given, else the server default,
+    // capped by the hard ceiling either way.
+    const effectiveMax = Math.min(
+      max_upscales ?? CONFIG.MAX_UPSCALES_PER_IMAGE,
+      UPSCALE_HARD_MAX
+    );
+    const current = image.upscales ? image.upscales.length : 0;
+    if (current >= effectiveMax) {
+      throw new HttpError(
+        409,
+        'UPSCALE_LIMIT_REACHED',
+        `Image ${image._id} ("${image.title}") already has ${current} upscale${current === 1 ? '' : 's'} — ` +
+          `the limit for this operation is ${effectiveMax}. ` +
+          'Delete an existing upscale first, or raise the limit (secret MAX_NUMBER_OF_UPSCALES_PER_IMAGE / input max_upscales).'
+      );
+    }
+
+    image.upscales.push(entry);
+    await image.save();
+    res.status(201).json({ data: toPlain(image) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /api/images/:id/upscales/:upscaleId
+ * Update one upscale entry (webapp "Mark used" stamp).
+ * Body: { used_in_adobe_stock: boolean }
+ */
+async function updateUpscale(req, res, next) {
+  try {
+    const image = await Image.findById(req.params.id);
+    if (!image) {
+      throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
+    }
+
+    const upscale = image.upscales && image.upscales.id(req.params.upscaleId);
+    if (!upscale) {
+      throw new HttpError(
+        404,
+        'UPSCALE_NOT_FOUND',
+        `Upscale ${req.params.upscaleId} does not exist on image ${image._id} — it may have been deleted already`
+      );
+    }
+
+    Object.assign(upscale, req.validated);
+    await image.save();
+    res.json({ data: toPlain(image) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /api/images/:id/upscales/:upscaleId
+ * Remove one upscale entry. When Cloudinary is configured on the API and the
+ * entry carries a public_id, the remote asset is destroyed too (best-effort —
+ * a Cloudinary failure never blocks the database deletion).
+ */
+async function removeUpscale(req, res, next) {
+  try {
+    const image = await Image.findById(req.params.id);
+    if (!image) {
+      throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
+    }
+
+    const upscale = image.upscales && image.upscales.id(req.params.upscaleId);
+    if (!upscale) {
+      throw new HttpError(
+        404,
+        'UPSCALE_NOT_FOUND',
+        `Upscale ${req.params.upscaleId} does not exist on image ${image._id} — it may have been deleted already`
+      );
+    }
+
+    const publicId = upscale.public_id;
+    upscale.deleteOne();
+    await image.save();
+
+    let cloudinary = null;
+    if (publicId) {
+      const result = await destroyAsset(publicId);
+      cloudinary = {
+        destroyed: result.destroyed,
+        note: result.error || result.result || 'ok',
+      };
+      if (!result.destroyed) {
+        console.warn(
+          `[api] upscale ${req.params.upscaleId}: DB entry removed, remote asset kept — ${cloudinary.note}`
+        );
+      }
+    }
+
+    res.json({ data: { deleted: true, upscalesRemaining: image.upscales.length, cloudinary } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/images/:id/upscales/:upscaleId/download
+ * Download proxy for an upscaled variant (same behavior as the original's
+ * download route: server-side fetch, attachment disposition, clear 502s).
+ */
+async function downloadUpscale(req, res, next) {
+  try {
+    const image = await Image.findById(req.params.id);
+    if (!image) {
+      throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
+    }
+
+    const upscale = image.upscales && image.upscales.id(req.params.upscaleId);
+    if (!upscale) {
+      throw new HttpError(
+        404,
+        'UPSCALE_NOT_FOUND',
+        `Upscale ${req.params.upscaleId} does not exist on image ${image._id} — it may have been deleted already`
+      );
+    }
+
+    let upstream;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), CONFIG.DOWNLOAD_TIMEOUT_MS);
+      upstream = await fetch(upscale.url, {
+        signal: controller.signal,
+        redirect: 'follow',
+      });
+      clearTimeout(timer);
+    } catch (e) {
+      return res.status(502).json({
+        error: {
+          code: 'BAD_GATEWAY',
+          message: `Could not fetch the upscaled image at its source — ${e.name === 'AbortError' ? 'timeout' : e.message}`,
+        },
+      });
+    }
+
+    if (!upstream.ok || !upstream.body) {
+      return res.status(502).json({
+        error: {
+          code: 'BAD_GATEWAY',
+          message: `The upscaled image source answered HTTP ${upstream.status} — the stored link may have expired`,
+        },
+      });
+    }
+
+    const type = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    const ext = EXT_BY_TYPE[type] || (upscale.url.split('.').pop() || 'png').toLowerCase().slice(0, 5);
+    const filename = `${slugify(image.title)}_${image._id}_x${upscale.scale}.${ext}`;
+
+    res.setHeader('Content-Type', type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+
+    const nodeStream = Readable.fromWeb(upstream.body);
+    nodeStream.on('error', (e) => {
+      console.error('[api] upscale download stream error:', e.message);
+      if (!res.headersSent) {
+        res.status(502).json({ error: { code: 'BAD_GATEWAY', message: 'Image stream interrupted' } });
+      } else {
+        res.end();
+      }
+    });
+    nodeStream.pipe(res);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  list,
+  create,
+  getOne,
+  update,
+  remove,
+  download,
+  addUpscale,
+  updateUpscale,
+  removeUpscale,
+  downloadUpscale,
+};

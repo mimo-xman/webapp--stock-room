@@ -69,6 +69,23 @@ const CONFIG = {
 
   // ── download proxy ──
   DOWNLOAD_TIMEOUT_MS: intEnv('DOWNLOAD_TIMEOUT_MS', 25000),
+
+  // ── upscales ──
+  // Default server-side policy: how many upscale entries an image may hold.
+  // Callers (GitHub Actions) pass their own max_upscales in the POST body —
+  // it applies when lower than this ceiling. Hard safety cap: UPSCALE_HARD_MAX.
+  MAX_UPSCALES_PER_IMAGE: intEnv('MAX_UPSCALES_PER_IMAGE', 10),
+
+  // ── Cloudinary (optional) ──
+  // Upscaled images are uploaded by the GitHub Actions runner, not here.
+  // These credentials are ONLY used to destroy the remote asset when an
+  // upscale entry is deleted from the webapp (storage hygiene).
+  // If unset, deletion only removes the database entry (documented behavior).
+  CLOUDINARY: {
+    CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || '',
+    API_KEY: process.env.CLOUDINARY_API_KEY || '',
+    API_SECRET: process.env.CLOUDINARY_API_SECRET || '',
+  },
 };
 
 function assertCriticals() {

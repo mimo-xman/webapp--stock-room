@@ -47,6 +47,14 @@ export default function ImagesPage() {
       ],
     },
     { key: "quality", label: "Quality", options: QUALITIES.map((q) => ({ value: q, label: q })) },
+    {
+      key: "has_upscales",
+      label: "Upscales",
+      options: [
+        { value: "true", label: "With upscales" },
+        { value: "false", label: "Without upscales" },
+      ],
+    },
   ];
 
   function openDetail(image: StockImage) {
@@ -62,8 +70,16 @@ export default function ImagesPage() {
       await api.images.update(image._id, { used_in_adobe_stock: next });
     } catch {
       list.patchLocal(image._id, { used_in_adobe_stock: !next });
+      if (detail?._id === image._id) setDetail({ ...detail, used_in_adobe_stock: !next });
       toast({ variant: "destructive", title: "Update failed", description: "The stamp was not applied." });
     }
+  }
+
+  /** Detail dialog reports upscale mutations (mark used / delete) with the
+   *  updated image — refresh the detail state and the grid row in place. */
+  function handleImageUpdate(updated: StockImage) {
+    setDetail((d) => (d && d._id === updated._id ? updated : d));
+    list.patchLocal(updated._id, { upscales: updated.upscales });
   }
 
   async function deleteImage(image: StockImage) {
@@ -157,6 +173,7 @@ export default function ImagesPage() {
         image={detail}
         onClose={() => setDetail(null)}
         onToggleUsed={toggleUsed}
+        onImageUpdate={handleImageUpdate}
         onEdit={(img) => {
           setDetail(null);
           setEditing(img);

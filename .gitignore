@@ -11,6 +11,7 @@ build/
 .turbo/
 .netlify/
 next-env.d.ts
+tsconfig.tsbuildinfo
 
 # env & secrets
 .env
@@ -28,3 +29,4 @@ coverage/
 # local data
 db/
 *.db
+__pycache__/

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ImageOff, Stamp } from "lucide-react";
+import { ImageOff, Stamp, ZoomIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StampToggle } from "./StampToggle";
 import type { StockImage } from "@/lib/types";
@@ -66,6 +66,15 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0 }: ImageCa
           <span className="chip max-w-full truncate border-line-strong text-ink">{image.category}</span>
           <span className="chip">{image.quality}</span>
           <span className="chip">{image.ratio}</span>
+          {(image.upscales?.length ?? 0) > 0 && (
+            <span
+              className="chip border-brand/60 text-brand"
+              title={`${image.upscales!.length} upscaled variant(s) — open the image to view them`}
+            >
+              <ZoomIn className="mr-0.5 h-3 w-3" aria-hidden />
+              ×{image.upscales!.length}
+            </span>
+          )}
           <span className="ml-auto flex items-center gap-1 font-mono text-[10px] text-ink-muted">
             <Stamp className="h-3 w-3" aria-hidden />
             {image.keywords.length}

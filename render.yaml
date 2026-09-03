@@ -21,3 +21,14 @@ services:
         sync: false
       - key: TRUST_PROXY
         value: "1"
+      # Upscales: default policy cap (GitHub Actions may pass a lower one)
+      - key: MAX_UPSCALES_PER_IMAGE
+        sync: false
+      # Upscales: optional — destroys the Cloudinary asset when an upscale
+      # entry is deleted from the webapp (uploads happen on the GH runner)
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false

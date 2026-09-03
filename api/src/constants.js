@@ -48,6 +48,13 @@ const IMAGE_SORT_FIELDS = [
 
 const MONGODB_OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 
+// Who can append an upscale entry (enum on the subdocument `source` field).
+const UPSCALE_SOURCES = ['github-actions', 'manual'];
+
+// Hard server-side ceiling for the upscales array (safety net on top of the
+// caller's own policy — see POST /api/images/:id/upscales and docs/UPSCALE.md).
+const UPSCALE_HARD_MAX = 10;
+
 module.exports = {
   ADOBE_CATEGORIES,
   QUALITIES,
@@ -57,4 +64,6 @@ module.exports = {
   SESSION_SORT_FIELDS,
   IMAGE_SORT_FIELDS,
   MONGODB_OBJECT_ID_RE,
+  UPSCALE_SOURCES,
+  UPSCALE_HARD_MAX,
 };

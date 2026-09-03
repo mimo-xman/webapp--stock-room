@@ -1,0 +1,115 @@
+# Upscale ONE image — manual workflow (Real-ESRGAN → Cloudinary → base).
+#
+# Behavior (see docs/UPSCALE.md):
+#   1. image must exist        → otherwise clear message + failed run;
+#   2. upscale count < max     → otherwise clean STOP with a clear message;
+#   3. download → upscale → upload → POST /api/images/:id/upscales.
+#
+# Same secrets as the batch workflow (ASSET_API_URL, ASSET_API_KEY,
+# CLOUDINARY_*, optional MAX_NUMBER_OF_UPSCALES_PER_IMAGE / DEFAULT_SCALE).
+name: Upscale — single image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_id:
+        description: "MongoDB _id de l'image (24 hex — visible dans le détail d'une image dans la webapp)"
+        required: true
+        default: ""
+      max_upscales:
+        description: "Stop si l'image a déjà ce nombre d'upscales (vide = secret MAX_NUMBER_OF_UPSCALES_PER_IMAGE, sinon 1)"
+        required: false
+        default: ""
+      scale:
+        description: "Facteur d'upscale 2-8 (vide = secret DEFAULT_SCALE, sinon 4)"
+        required: false
+        default: ""
+      model:
+        description: "Modèle Real-ESRGAN"
+        type: choice
+        options:
+          - RealESRGAN_x4plus
+          - realesr-general-x4v3
+          - RealESRGAN_x2plus
+        default: RealESRGAN_x4plus
+      dry_run:
+        description: "Vérifier l'image et la limite sans rien upscaler"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upscale-single-${{ inputs.image_id }}
+  cancel-in-progress: false
+
+jobs:
+  upscale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache Python packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: upscale-pip-${{ hashFiles('scripts/upscale/requirements.txt') }}
+          restore-keys: upscale-pip-
+
+      - name: Cache Real-ESRGAN models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/upscale-models
+          key: upscale-models-v1
+
+      - name: Install dependencies (CPU-only torch)
+        # Two-phase on purpose: basicsr 1.4.2 ships an sdist whose isolated
+        # build would re-download torch (~200 MB) — installing torch first
+        # then building basicsr with --no-build-isolation avoids that.
+        # `+cpu` labels are explicit: a bare ==2.1.2 could resolve to a
+        # PyPI CUDA wheel (~2 GB of nvidia-* deps).
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install torch==2.1.2+cpu torchvision==0.16.2+cpu --index-url https://download.pytorch.org/whl/cpu
+          pip install --no-build-isolation -r scripts/upscale/requirements.txt
+
+      - name: Patch basicsr for torchvision compatibility
+        # basicsr 1.4.2 imports torchvision.transforms.functional_tensor,
+        # removed in torchvision >= 0.17. Our pins avoid it, this patch is
+        # a defensive fix if the pins are ever relaxed. NOTE: basicsr's
+        # location is resolved WITHOUT importing it — importing basicsr
+        # would itself fail when the patch is needed.
+        run: |
+          SITE=$(python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+          DEGRADATIONS="$SITE/basicsr/data/degradations.py"
+          if [ -f "$DEGRADATIONS" ] && grep -q "functional_tensor" "$DEGRADATIONS"; then
+            sed -i 's/from torchvision.transforms.functional_tensor import rgb_to_grayscale/from torchvision.transforms.functional import rgb_to_grayscale/' "$DEGRADATIONS"
+            echo "basicsr patched (functional_tensor import rewritten)"
+          else
+            echo "basicsr already compatible — no patch needed"
+          fi
+
+      - name: Upscale the image
+        env:
+          ASSET_API_URL: ${{ secrets.ASSET_API_URL }}
+          ASSET_API_KEY: ${{ secrets.ASSET_API_KEY }}
+          MAX_NUMBER_OF_UPSCALES_PER_IMAGE: ${{ inputs.max_upscales || secrets.MAX_NUMBER_OF_UPSCALES_PER_IMAGE || '1' }}
+          DEFAULT_SCALE: ${{ inputs.scale || secrets.DEFAULT_SCALE || '4' }}
+          UPSCALE_MODEL: ${{ inputs.model || 'RealESRGAN_x4plus' }}
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          python scripts/upscale/single.py --image-id "${{ inputs.image_id }}" $DRY_RUN_FLAG

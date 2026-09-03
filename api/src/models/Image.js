@@ -2,9 +2,12 @@
  * Image model — one generated stock asset with its Adobe Stock upload metadata.
  */
 const mongoose = require('mongoose');
-const { ADOBE_CATEGORIES } = require('../constants');
+const { ADOBE_CATEGORIES, UPSCALE_SOURCES } = require('../constants');
 
 const RATIO_RE = /^(auto|\d{1,2}:\d{1,2})$/i;
+const HTTP_URL_RE = /^https?:\/\//;
+const SCALE_MIN = 2;
+const SCALE_MAX = 8;
 
 const imageSchema = new mongoose.Schema(
   {
@@ -74,6 +77,70 @@ const imageSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
       index: true,
+    },
+
+    // ── upscales (Real-ESRGAN derivatives, produced by GitHub Actions) ──
+    // One entry per upscaled variant, appended via POST /api/images/:id/upscales.
+    // The entry count is the "number of upscales" compared against the policy
+    // limit (secrets: MAX_NUMBER_OF_UPSCALES_PER_IMAGE — see docs/UPSCALE.md).
+    upscales: {
+      type: [
+        {
+          url: {
+            type: String,
+            required: true,
+            trim: true,
+            maxlength: 2048,
+            validate: {
+              validator: (v) => HTTP_URL_RE.test(v),
+              message: 'upscale url must be an absolute http(s) URL',
+            },
+          },
+          public_id: {
+            type: String,
+            trim: true,
+            maxlength: 512,
+            default: '',
+          },
+          scale: {
+            type: Number,
+            required: true,
+            min: [SCALE_MIN, `scale must be ≥ ${SCALE_MIN}`],
+            max: [SCALE_MAX, `scale must be ≤ ${SCALE_MAX}`],
+          },
+          model: {
+            type: String,
+            required: true,
+            trim: true,
+            maxlength: 100,
+          },
+          width: { type: Number, min: 1 },
+          height: { type: Number, min: 1 },
+          size_bytes: { type: Number, min: 0 },
+          source: {
+            type: String,
+            enum: UPSCALE_SOURCES,
+            default: 'github-actions',
+          },
+          run_id: {
+            type: String,
+            trim: true,
+            maxlength: 64,
+            default: '',
+          },
+          used_in_adobe_stock: {
+            type: Boolean,
+            default: false,
+          },
+          created_at: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
+      default: [],
+      // No index: the batch job filters on the array *count* via $expr/$size,
+      // which MongoDB cannot serve from an index anyway.
     },
   },
   { timestamps: true, collation: { locale: 'en', strength: 2 } }

@@ -7,7 +7,7 @@ const { dbState } = require('../db');
 const { requireAuth, badAuthGuard } = require('../middleware/auth');
 const { generalLimiter, authLimiter } = require('../middleware/rateLimit');
 const { validate } = require('../middleware/validate');
-const { verifySchema, sessionCreateSchema, imageCreateSchema, imageUpdateSchema } = require('../schemas');
+const { verifySchema, sessionCreateSchema, imageCreateSchema, imageUpdateSchema, upscaleCreateSchema, upscaleUpdateSchema } = require('../schemas');
 const authController = require('../controllers/authController');
 const sessionController = require('../controllers/sessionController');
 const imageController = require('../controllers/imageController');
@@ -55,5 +55,12 @@ router.get('/api/images/:id', imageController.getOne);
 router.patch('/api/images/:id', validate(imageUpdateSchema), imageController.update);
 router.delete('/api/images/:id', imageController.remove);
 router.get('/api/images/:id/download', imageController.download);
+
+// image upscales (Real-ESRGAN derivatives — registered by GitHub Actions,
+// managed from the webapp: mark used / download / delete)
+router.post('/api/images/:id/upscales', validate(upscaleCreateSchema), imageController.addUpscale);
+router.patch('/api/images/:id/upscales/:upscaleId', validate(upscaleUpdateSchema), imageController.updateUpscale);
+router.delete('/api/images/:id/upscales/:upscaleId', imageController.removeUpscale);
+router.get('/api/images/:id/upscales/:upscaleId/download', imageController.downloadUpscale);
 
 module.exports = router;

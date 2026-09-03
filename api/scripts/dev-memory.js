@@ -18,7 +18,10 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
   console.log('[dev] in-memory MongoDB:', process.env.MONGODB_URI);
   console.log('[dev] agent key:', process.env.API_KEY, '| app password:', process.env.APP_PASSWORD);
 
-  require('../src/server');
+  // server.js only auto-starts when it is the entry point (require.main
+  // guard added for the e2e suite) — start it explicitly here.
+  const { main } = require('../src/server');
+  await main();
 
   const shutdown = () => {
     mongod.stop().finally(() => process.exit(0));

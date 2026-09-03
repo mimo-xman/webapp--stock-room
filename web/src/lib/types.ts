@@ -18,6 +18,22 @@ export interface Session {
 
 export type Quality = "1K" | "2K" | "4K";
 
+/** One Real-ESRGAN upscale variant on an image (see docs/UPSCALE.md). */
+export interface Upscale {
+  _id: string;
+  url: string;
+  public_id?: string;
+  scale: number;
+  model: string;
+  width?: number;
+  height?: number;
+  size_bytes?: number;
+  source?: "github-actions" | "manual";
+  run_id?: string;
+  used_in_adobe_stock?: boolean;
+  created_at?: string;
+}
+
 export interface StockImage {
   _id: string;
   session_id: string;
@@ -29,6 +45,9 @@ export interface StockImage {
   category: string;
   keywords: string[];
   used_in_adobe_stock: boolean;
+  /** Upscaled variants (Real-ESRGAN via GitHub Actions) — absent on images
+   *  created before the feature; always use `image.upscales ?? []`. */
+  upscales?: Upscale[];
   createdAt: string;
   updatedAt: string;
 }

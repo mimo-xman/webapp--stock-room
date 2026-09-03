@@ -22,10 +22,14 @@ const endpointRows = [
   ['DELETE', '/api/sessions/:id', 'Delete a session and ALL its images (cascade)', true],
   ['GET', '/api/images', 'List images — pagination, search, filters, sort', true],
   ['POST', '/api/images', 'Register a generated image (full metadata)', true],
-  ['GET', '/api/images/:id', 'One image', true],
+  ['GET', '/api/images/:id', 'One image (incl. its upscales)', true],
   ['PATCH', '/api/images/:id', 'Edit image metadata (incl. used_in_adobe_stock)', true],
   ['DELETE', '/api/images/:id', 'Delete an image', true],
   ['GET', '/api/images/:id/download', 'Download the image file (server-side proxy)', true],
+  ['POST', '/api/images/:id/upscales', 'Register an upscaled variant (Real-ESRGAN job) — 409 UPSCALE_LIMIT_REACHED when the image already holds max_upscales entries', true],
+  ['PATCH', '/api/images/:id/upscales/:upscaleId', 'Mark an upscaled variant used / unused', true],
+  ['DELETE', '/api/images/:id/upscales/:upscaleId', 'Delete an upscaled variant (+ Cloudinary destroy when configured)', true],
+  ['GET', '/api/images/:id/upscales/:upscaleId/download', 'Download an upscaled variant (proxy)', true],
 ];
 
 const rowsHtml = endpointRows
@@ -122,7 +126,9 @@ sort      whitelisted field per resource
 order     asc | desc               (default desc)
 from / to ISO dates on createdAt</pre>
     <p>Images also accept exact filters: <code>session_id</code>, <code>category</code>,
-    <code>used_in_adobe_stock=true|false</code>, <code>quality</code>, <code>ratio</code>.
+    <code>used_in_adobe_stock=true|false</code>, <code>quality</code>, <code>ratio</code>,
+    plus upscale filters: <code>has_upscales=true|false</code> (webapp) or
+    <code>upscales_lt=N</code> — images with fewer than N upscales (daily batch job).
     Response envelope:</p>
     <pre>{"data":[ … ],"pagination":{"page":1,"limit":10,"total":42,"totalPages":5}}</pre>
   </div>

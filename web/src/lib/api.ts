@@ -5,7 +5,7 @@
  * A 401 kicks the user back to the gate (password changed or wrong).
  */
 
-import type { ListParams, ListResponse, Session, StockImage, ApiErrorPayload } from "./types";
+import type { ListParams, ListResponse, Session, StockImage, Upscale, ApiErrorPayload } from "./types";
 import { getAppPassword, clearAppPassword } from "./auth";
 
 function resolveApiUrl(): string {
@@ -129,19 +129,53 @@ export const api = {
         throw new ApiError(res.status, (json && json.error) || undefined);
       }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filenameFrom(image);
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      saveBlob(blob, filenameFrom(image));
+    },
+
+    /** Upscaled variants (Real-ESRGAN via GitHub Actions). */
+    upscales: {
+      /** Toggle the "Mark used" stamp on one upscaled variant. */
+      update(imageId: string, upscaleId: string, patch: { used_in_adobe_stock: boolean }): Promise<{ data: StockImage }> {
+        return request(`/api/images/${imageId}/upscales/${upscaleId}`, {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+        });
+      },
+      /** Delete one variant — the server also destroys the Cloudinary asset
+       *  when the API is configured with CLOUDINARY_* env vars. */
+      remove(imageId: string, upscaleId: string): Promise<{ data: { deleted: boolean; upscalesRemaining: number; cloudinary?: { destroyed: boolean; note?: string } | null } }> {
+        return request(`/api/images/${imageId}/upscales/${upscaleId}`, { method: "DELETE" });
+      },
+      /** Download one variant via the server proxy. */
+      async download(image: StockImage, upscale: Upscale): Promise<void> {
+        const password = getAppPassword();
+        const res = await fetch(`${API_URL}/api/images/${image._id}/upscales/${upscale._id}/download`, {
+          headers: password ? { "X-App-Password": password } : {},
+        });
+        if (!res.ok) {
+          const json = await res.json().catch(() => null);
+          throw new ApiError(res.status, (json && json.error) || undefined);
+        }
+        const blob = await res.blob();
+        const ext = (upscale.url.split("?")[0].split(".").pop() || "png").toLowerCase().slice(0, 5);
+        saveBlob(blob, `${filenameFrom(image, "")}_x${upscale.scale}.${ext}`);
+      },
     },
   },
 };
 
-function filenameFrom(image: StockImage): string {
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function filenameFrom(image: StockImage, suffix = `_${image._id}`): string {
   const ext = (image.image_link.split("?")[0].split(".").pop() || "png").toLowerCase().slice(0, 5);
   const slug = image.title
     .toLowerCase()
@@ -150,5 +184,5 @@ function filenameFrom(image: StockImage): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
-  return `${slug || "image"}_${image._id}.${ext}`;
+  return `${slug || "image"}${suffix}.${ext}`;
 }

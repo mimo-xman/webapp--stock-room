@@ -10,7 +10,7 @@ npm install
 cp .env.example .env          # then edit MONGODB_URI / API_KEY / APP_PASSWORD
 npm start                     # production
 npm run dev                   # dev with in-memory MongoDB (no Atlas needed)
-npm test                      # 56-assertion E2E suite (in-memory MongoDB)
+npm test                      # 81-assertion E2E suite (in-memory MongoDB)
 node scripts/seed-demo.cjs    # demo data (2 sessions, 16 images)
 ```
 
@@ -39,14 +39,20 @@ authentications per IP are counted and blocked (brute-force guard).
 | POST | `/api/sessions` | create `{ "title": "…" }` (unique, 3–120 chars) | ✔ |
 | GET | `/api/sessions/:id` | one session + `imagesCount` / `usedCount` | ✔ |
 | DELETE | `/api/sessions/:id` | delete session **and all its images** | ✔ |
-| GET | `/api/images` | list + filters: `session_id`, `category`, `used_in_adobe_stock`, `quality`, same pagination/sort as above | ✔ |
+| GET | `/api/images` | list + filters: `session_id`, `category`, `used_in_adobe_stock`, `quality`, `has_upscales` ∈ true/false, `upscales_lt` = N (images with fewer than N upscales), same pagination/sort as above | ✔ |
 | POST | `/api/images` | register an image (full metadata, validated) | ✔ |
-| GET | `/api/images/:id` | one image | ✔ |
+| GET | `/api/images/:id` | one image (incl. its `upscales[]`) | ✔ |
 | PATCH | `/api/images/:id` | edit any metadata field(s) (e.g. `used_in_adobe_stock`) | ✔ |
 | DELETE | `/api/images/:id` | delete one image | ✔ |
 | GET | `/api/images/:id/download` | download the image (server-side proxy, `Content-Disposition`) | ✔ |
+| POST | `/api/images/:id/upscales` | register an upscaled variant (Real-ESRGAN job) — body `{ url, scale, model, public_id?, width?, height?, size_bytes?, source?, run_id?, max_upscales? }` → 409 `UPSCALE_LIMIT_REACHED` when the image already holds `max_upscales` entries | ✔ |
+| PATCH | `/api/images/:id/upscales/:upscaleId` | mark a variant used/unused (`{ "used_in_adobe_stock": true }`) | ✔ |
+| DELETE | `/api/images/:id/upscales/:upscaleId` | delete a variant (+ Cloudinary destroy when `CLOUDINARY_*` env vars are set — best-effort) | ✔ |
+| GET | `/api/images/:id/upscales/:upscaleId/download` | download a variant (proxied) | ✔ |
 
 Sessions are intentionally **not editable** — the product lets the owner modify images only.
+Upscales are appended by the GitHub Actions Real-ESRGAN job (see `docs/UPSCALE.md`) and managed
+from the webapp; the server enforces a hard cap (`MAX_UPSCALES_PER_IMAGE`, default 10).
 
 ## Response envelope
 
@@ -56,8 +62,9 @@ Sessions are intentionally **not editable** — the product lets the owner modif
 ```
 
 Error codes: `VALIDATION_ERROR` (400), `AUTH_REQUIRED` (401), `NOT_FOUND` (404),
-`SESSION_NOT_FOUND` (404), `CONFLICT` (409 — duplicate session title), `RATE_LIMITED` (429),
-`BAD_GATEWAY` (502 — dead image link on download), `INTERNAL` (500).
+`SESSION_NOT_FOUND` (404), `UPSCALE_NOT_FOUND` (404), `CONFLICT` (409 — duplicate session title),
+`UPSCALE_LIMIT_REACHED` (409 — image already holds the max number of upscales),
+`RATE_LIMITED` (429), `BAD_GATEWAY` (502 — dead image link on download), `INTERNAL` (500).
 
 ## Deploy (Render)
 
@@ -65,3 +72,6 @@ Error codes: `VALIDATION_ERROR` (400), `AUTH_REQUIRED` (401), `NOT_FOUND` (404),
 Required env vars: `MONGODB_URI`, `API_KEY`, `APP_PASSWORD`, plus `CORS_ORIGINS` set to the
 Netlify URL of the web app. Optional `MONGO_DB_NAME` selects the database separately from
 the URI (default `adobe-stock`, or the db found in the URI path).
+Upscale-related optional vars: `MAX_UPSCALES_PER_IMAGE` (default policy cap, hard ceiling 10)
+and `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` (enable the
+remote-asset destroy when a variant is deleted — see `docs/UPSCALE.md`).

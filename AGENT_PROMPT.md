@@ -196,11 +196,20 @@ Auth: header `X-API-Key: [ADOBE STOCK IMAGES GENERATOR BY AGENTS API KEY]`.
 | `GET /api/sessions/:id` | Session + counts |
 | `DELETE /api/sessions/:id` | Delete session **and all its images** |
 | `POST /api/images` | Register an image (full metadata) |
-| `GET /api/images` | List/filter images (`session_id`, `category`, `used_in_adobe_stock`, `quality`, `search`, `sort`, `order`, `page`, `limit` ∈ 5/10/20/50/100) |
-| `GET /api/images/:id` | One image |
+| `GET /api/images` | List/filter images (`session_id`, `category`, `used_in_adobe_stock`, `quality`, `has_upscales`, `search`, `sort`, `order`, `page`, `limit` ∈ 5/10/20/50/100) |
+| `GET /api/images/:id` | One image (incl. `upscales[]`) |
 | `PATCH /api/images/:id` | Edit fields (owner marks `used_in_adobe_stock`) |
 | `DELETE /api/images/:id` | Delete one image |
 | `GET /api/images/:id/download` | Download the image file (proxied) |
+| `POST /api/images/:id/upscales` | Register an upscaled variant `{ url, scale, model, public_id?, width?, height?, size_bytes?, source?, run_id?, max_upscales? }` (used by the Real-ESRGAN GitHub Actions job — you do not call this) |
+| `PATCH /api/images/:id/upscales/:upscaleId` | Mark a variant used/unused (owner, via webapp) |
+| `DELETE /api/images/:id/upscales/:upscaleId` | Delete a variant (owner, via webapp) |
+| `GET /api/images/:id/upscales/:upscaleId/download` | Download a variant (proxied) |
+
+Note: images gain `upscales[]` entries (Real-ESRGAN ×2/×4, uploaded to Cloudinary)
+from the daily GitHub Actions job — you never create them. `used_in_adobe_stock`
+on the image stays YOUR signal for the original; each variant carries its own
+`used_in_adobe_stock` flag managed by the owner in the webapp.
 
 Validation highlights: `category` must be one of the 21 Adobe categories; `title` 3–200 chars;
 `keywords` 3–50 entries; `image_link` must be http(s); `session_id` must exist.

@@ -1,0 +1,25 @@
+# Real-ESRGAN upscale pipeline — CPU-only PyTorch wheels.
+#
+# Version pins matter:
+#  - basicsr 1.4.2 ships as an sdist whose setup.py uses the exec()+locals()
+#    version idiom, which Python 3.13 BROKE (PEP 667 → KeyError '__version__').
+#    It builds fine on Python ≤ 3.12 → the workflows pin Python 3.11.
+#  - basicsr 1.4.2 imports `torchvision.transforms.functional_tensor`,
+#    which was REMOVED in torchvision >= 0.17 → we pin 0.16.2 here AND
+#    apply a defensive sed patch in the workflows (see
+#    .github/workflows/upscale-batch.yml).
+#  - torch 2.1.2 wheels were built against numpy 1.x → pin numpy 1.26.4.
+#  - The torch pins carry the explicit `+cpu` local label: without it, pip
+#    can resolve a same-version CUDA wheel from PyPI (which drags ~2 GB of
+#    nvidia-* dependencies). `+cpu` can only match the CPU wheels of the
+#    extra index below.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.1.2+cpu
+torchvision==0.16.2+cpu
+numpy==1.26.4
+realesrgan==0.3.0
+basicsr==1.4.2
+opencv-python-headless==4.9.0.80
+Pillow>=10.2,<11
+requests>=2.31,<3
+cloudinary>=1.40,<2
