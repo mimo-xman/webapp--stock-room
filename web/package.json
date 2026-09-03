@@ -2,7 +2,7 @@
   "name": "stockroom-webapp",
   "version": "1.0.0",
   "private": true,
-  "description": "Stockroom \u2014 web app for Adobe Stock - Images Generator by agents (password-gated asset manager for generation sessions and images).",
+  "description": "Stockroom — web app for Adobe Stock - Images Generator by agents (password-gated asset manager for generation sessions and images).",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -59,6 +59,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/node": "^24.13.3",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
