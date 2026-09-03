@@ -1,0 +1,27 @@
+{
+  "name": "adobe-stock-images-generator-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Asset database API for 'Adobe Stock - Images Generator by agents' — stores generation Sessions and Images metadata for the Adobe Stock upload pipeline.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node scripts/dev-memory.js",
+    "test": "node test/e2e.cjs"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "mongoose": "^8.9.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.1.2"
+  }
+}

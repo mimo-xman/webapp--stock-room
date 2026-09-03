@@ -1,0 +1,59 @@
+/**
+ * API routes.
+ */
+const express = require('express');
+const { CONFIG } = require('../config');
+const { dbState } = require('../db');
+const { requireAuth, badAuthGuard } = require('../middleware/auth');
+const { generalLimiter, authLimiter } = require('../middleware/rateLimit');
+const { validate } = require('../middleware/validate');
+const { verifySchema, sessionCreateSchema, imageCreateSchema, imageUpdateSchema } = require('../schemas');
+const authController = require('../controllers/authController');
+const sessionController = require('../controllers/sessionController');
+const imageController = require('../controllers/imageController');
+const docsHtml = require('./docs');
+
+const router = express.Router();
+
+// ── public ──
+router.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(docsHtml);
+});
+
+router.get('/health', (req, res) => {
+  res.json({
+    success: true,
+    service: 'adobe-stock-images-generator-api',
+    version: CONFIG.VERSION,
+    status: dbState() === 'up' ? 'ok' : 'degraded',
+    db: dbState(),
+    uptimeSeconds: Math.floor(process.uptime()),
+  });
+});
+
+router.get('/ready', (req, res) => {
+  const up = dbState() === 'up';
+  res.status(up ? 200 : 503).json({ ready: up });
+});
+
+router.post('/auth/verify', authLimiter, validate(verifySchema), authController.verify);
+
+// ── authenticated ──
+router.use('/api', badAuthGuard, generalLimiter, requireAuth);
+
+// sessions
+router.get('/api/sessions', sessionController.list);
+router.post('/api/sessions', validate(sessionCreateSchema), sessionController.create);
+router.get('/api/sessions/:id', sessionController.getOne);
+router.delete('/api/sessions/:id', sessionController.remove);
+
+// images
+router.get('/api/images', imageController.list);
+router.post('/api/images', validate(imageCreateSchema), imageController.create);
+router.get('/api/images/:id', imageController.getOne);
+router.patch('/api/images/:id', validate(imageUpdateSchema), imageController.update);
+router.delete('/api/images/:id', imageController.remove);
+router.get('/api/images/:id/download', imageController.download);
+
+module.exports = router;

@@ -1,0 +1,199 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-display: var(--font-barlow-semi-cond);
+  --font-sans: var(--font-barlow);
+  --font-mono: var(--font-ibm-plex-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ── Stockroom tokens (bespoke, not shadcn defaults) ── */
+@theme {
+  --color-paper: #f3f2ed;
+  --color-surface: #ffffff;
+  --color-ink: #17181c;
+  --color-ink-muted: #5c6169;
+  --color-line: #dad8d0;
+  --color-line-strong: #b9b6ac;
+  --color-brand: #e8500a;
+  --color-brand-deep: #c34307;
+  --color-brand-soft: #fdebdd;
+  --color-stamp: #226b45;
+  --color-stamp-soft: #e4efe7;
+  --color-danger: #c03434;
+  --color-danger-soft: #fbe9e9;
+  --shadow-hard: 4px 4px 0 0 var(--color-ink);
+  --shadow-hard-sm: 2px 2px 0 0 var(--color-ink);
+}
+
+:root {
+  --radius: 0.25rem;
+  --background: #f3f2ed;
+  --foreground: #17181c;
+  --card: #ffffff;
+  --card-foreground: #17181c;
+  --popover: #ffffff;
+  --popover-foreground: #17181c;
+  --primary: #e8500a;
+  --primary-foreground: #ffffff;
+  --secondary: #ecebe6;
+  --secondary-foreground: #17181c;
+  --muted: #ecebe6;
+  --muted-foreground: #5c6169;
+  --accent: #ecebe6;
+  --accent-foreground: #17181c;
+  --destructive: #c03434;
+  --border: #dad8d0;
+  --input: #b9b6ac;
+  --ring: #e8500a;
+  --chart-1: #e8500a;
+  --chart-2: #226b45;
+  --chart-3: #6e7480;
+  --chart-4: #b9b6ac;
+  --chart-5: #c03434;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #17181c;
+  --sidebar-primary: #e8500a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ecebe6;
+  --sidebar-accent-foreground: #17181c;
+  --sidebar-border: #dad8d0;
+  --sidebar-ring: #e8500a;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply bg-paper;
+  }
+  body {
+    @apply bg-paper text-foreground font-sans;
+  }
+  ::selection {
+    background: #e8500a;
+    color: #ffffff;
+  }
+}
+
+/* ── signature: the rubber stamp ── */
+.stamp {
+  font-family: var(--font-barlow-semi-cond);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--color-stamp);
+  border: 2px solid var(--color-stamp);
+  outline: 2px solid var(--color-stamp);
+  outline-offset: 3px;
+  background: color-mix(in srgb, var(--color-stamp) 7%, transparent);
+  padding: 0.3rem 0.8rem;
+  transform: rotate(-7deg);
+  white-space: nowrap;
+  mix-blend-mode: multiply;
+  user-select: none;
+}
+
+.stamp-thunk {
+  animation: stamp-in 160ms cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+@keyframes stamp-in {
+  0% {
+    transform: rotate(-7deg) scale(1.6);
+    opacity: 0;
+  }
+  100% {
+    transform: rotate(-7deg) scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stamp-thunk {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── micro-labels ── */
+.eyebrow {
+  font-family: var(--font-barlow-semi-cond);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.65rem;
+  color: var(--color-ink-muted);
+}
+
+.chip {
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border: 1px solid var(--color-line-strong);
+  color: var(--color-ink-muted);
+  padding: 0.1rem 0.45rem;
+  white-space: nowrap;
+}
+
+/* thin utilitarian scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}

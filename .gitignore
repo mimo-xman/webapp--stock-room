@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# builds
+.next/
+out/
+dist/
+build/
+.turbo/
+.netlify/
+next-env.d.ts
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# logs & misc
+*.log
+npm-debug.log*
+.DS_Store
+coverage/
+.idea/
+.vscode/
+
+# local data
+db/
+*.db

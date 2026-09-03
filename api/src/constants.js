@@ -1,0 +1,60 @@
+/**
+ * Domain constants — Adobe Stock taxonomy + API conventions.
+ */
+
+// The 21 official Adobe Stock contributor categories (exact values).
+const ADOBE_CATEGORIES = [
+  'Animals',
+  'Buildings and Architecture',
+  'Business',
+  'Drinks',
+  'The Environment',
+  'States of Mind',
+  'Food',
+  'Graphic Resources',
+  'Hobbies and Leisure',
+  'Industry',
+  'Landscapes',
+  'Lifestyle',
+  'People',
+  'Plants and Flowers',
+  'Culture and Religion',
+  'Science',
+  'Social Issues',
+  'Sports',
+  'Technology',
+  'Transport',
+  'Travel',
+];
+
+const QUALITIES = ['1K', '2K', '4K'];
+
+// Aspect ratios accepted by the image generation API (zazogptimage2api).
+const RATIOS = [
+  'Auto', '1:1', '16:9', '9:16', '4:3', '3:4',
+  '3:2', '2:3', '2:1', '1:2', '3:1', '1:3', '21:9', '9:21',
+];
+
+// Server-enforced page sizes (the web app must use one of these).
+const PAGE_SIZES = [5, 10, 20, 50, 100];
+const DEFAULT_PAGE_SIZE = 10;
+
+// Sortable fields (whitelists — anything else is a validation error).
+const SESSION_SORT_FIELDS = ['createdAt', 'updatedAt', 'title', 'imagesCount'];
+const IMAGE_SORT_FIELDS = [
+  'createdAt', 'updatedAt', 'title', 'prompt',
+  'category', 'used_in_adobe_stock', 'quality', 'ratio',
+];
+
+const MONGODB_OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
+
+module.exports = {
+  ADOBE_CATEGORIES,
+  QUALITIES,
+  RATIOS,
+  PAGE_SIZES,
+  DEFAULT_PAGE_SIZE,
+  SESSION_SORT_FIELDS,
+  IMAGE_SORT_FIELDS,
+  MONGODB_OBJECT_ID_RE,
+};
