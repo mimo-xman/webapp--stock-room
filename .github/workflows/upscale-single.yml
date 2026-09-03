@@ -50,22 +50,22 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Cache Python packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: upscale-pip-${{ hashFiles('scripts/upscale/requirements.txt') }}
           restore-keys: upscale-pip-
 
       - name: Cache Real-ESRGAN models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/upscale-models
           key: upscale-models-v1
