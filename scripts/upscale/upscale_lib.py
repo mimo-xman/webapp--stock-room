@@ -300,7 +300,11 @@ class AssetApi:
 class CloudinaryUploader:
     def __init__(self, config: JobConfig):
         self.folder = config.cloudinary_folder
+        # NB: cloudinary >= 1.41 no longer auto-imports its submodules from the
+        # top-level package — `import cloudinary` alone leaves `cloudinary.uploader`
+        # unbound and raises AttributeError. Import the submodule explicitly.
         import cloudinary  # lazy
+        import cloudinary.uploader  # noqa: F401 — binds cloudinary.uploader
 
         cloudinary.config(
             cloud_name=config.cloudinary_cloud_name,

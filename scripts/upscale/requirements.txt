@@ -9,6 +9,8 @@
 #    apply a defensive sed patch in the workflows (see
 #    .github/workflows/upscale-batch.yml).
 #  - torch 2.1.2 wheels were built against numpy 1.x → pin numpy 1.26.4.
+#  - cloudinary >= 1.41 stopped auto-importing its submodules (uploader/api):
+#    the code imports cloudinary.uploader EXPLICITLY — do not "simplify" it.
 #  - The torch pins carry the explicit `+cpu` local label: without it, pip
 #    can resolve a same-version CUDA wheel from PyPI (which drags ~2 GB of
 #    nvidia-* dependencies). `+cpu` can only match the CPU wheels of the
