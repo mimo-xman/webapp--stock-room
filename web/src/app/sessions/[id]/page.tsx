@@ -266,6 +266,7 @@ export default function SessionDetailPage() {
         onToggleUsed={toggleUsed}
         onImageUpdate={handleImageUpdate}
         selection={{ isSelected: csvSel.isSelected, toggle: csvSel.toggle }}
+        nav={{ images, onNavigate: openDetail }}
         onEdit={(img) => {
           setDetail(null);
           setEditing(img);

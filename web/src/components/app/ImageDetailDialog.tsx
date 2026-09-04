@@ -5,10 +5,11 @@
  * all Adobe Stock metadata with quick copy icons, download, stamp toggle,
  * edit, delete. Upscaled variants (Real-ESRGAN via GitHub Actions) are
  * listed in the metadata column with per-variant mark-used / download /
- * delete actions.
+ * delete actions. Optional looping prev/next navigation (arrows + ←/→ keys)
+ * across the page's image list.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Dialog,
@@ -17,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Check, FileDown, Pencil, Trash2, Download, ImageOff, ArrowRight, ZoomIn, ExternalLink, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, FileDown, Pencil, Trash2, Download, ImageOff, ArrowRight, ZoomIn, ExternalLink, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { CopyButton } from "./CopyButton";
 import { StampToggle } from "./StampToggle";
 import { StatusToggle } from "./StatusToggle";
@@ -44,6 +45,13 @@ interface ImageDetailDialogProps {
     isSelected: (imageId: string, variantId: string) => boolean;
     toggle: (image: StockImage, upscale?: Upscale) => void;
   };
+  /** Looping prev/next navigation across the page's image list — the dialog
+   *  renders side arrows + a position counter and handles the ←/→ keys.
+   *  Provided by pages that own the list; undefined = feature off. */
+  nav?: {
+    images: StockImage[];
+    onNavigate: (image: StockImage) => void;
+  };
 }
 
 const VARIANT_ORIGINAL = "original";
@@ -57,6 +65,7 @@ export function ImageDetailDialog({
   onImageUpdate,
   sessionTitle,
   selection,
+  nav,
 }: ImageDetailDialogProps) {
   const [broken, setBroken] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -68,6 +77,48 @@ export function ImageDetailDialog({
   const [busyStatus, setBusyStatus] = useState(false);
   const [busyDismiss, setBusyDismiss] = useState(false);
   const { toast } = useToast();
+
+  const metaScrollRef = useRef<HTMLDivElement>(null);
+
+  // ── looping prev/next navigation across the page's image list ──
+  const navIndex = nav && image ? nav.images.findIndex((i) => i._id === image._id) : -1;
+  const canNavigate = Boolean(nav && nav.images.length > 1 && navIndex >= 0);
+
+  function navigate(delta: -1 | 1) {
+    if (!nav || !image || navIndex < 0 || nav.images.length < 2) return;
+    const total = nav.images.length;
+    // Loop: past the first image goes to the last, past the last to the first.
+    nav.onNavigate(nav.images[(navIndex + delta + total) % total]);
+  }
+
+  // ← / → switch images while the dialog is open. The listener is re-attached
+  // on every render so the closures stay fresh after each image switch.
+  useEffect(() => {
+    if (!image || !canNavigate) return;
+    function onKey(e: KeyboardEvent) {
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        navigate(1);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  // Reset the metadata column scroll when the dialog switches to another image.
+  useEffect(() => {
+    metaScrollRef.current?.scrollTo({ top: 0 });
+  }, [image?._id]);
 
   // Reset the transient states when the dialog switches to another image
   // (adjust-state-during-render pattern — same as FilterBar).
@@ -220,6 +271,39 @@ export function ImageDetailDialog({
                   Used · Adobe Stock
                 </span>
               )}
+
+              {/* Looping prev/next navigation (arrows + position counter) */}
+              {canNavigate && nav && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate(-1)}
+                    aria-label="Previous image (loops back to the last one)"
+                    title="Previous image — ←"
+                    data-testid="detail-nav-prev"
+                    className="absolute left-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center border-2 border-ink bg-surface/90 text-ink shadow-[var(--shadow-hard-sm)] transition-colors hover:bg-ink hover:text-paper focus-visible:outline-2 focus-visible:outline-brand"
+                  >
+                    <ChevronLeft className="h-5 w-5" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate(1)}
+                    aria-label="Next image (loops back to the first one)"
+                    title="Next image — →"
+                    data-testid="detail-nav-next"
+                    className="absolute right-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center border-2 border-ink bg-surface/90 text-ink shadow-[var(--shadow-hard-sm)] transition-colors hover:bg-ink hover:text-paper focus-visible:outline-2 focus-visible:outline-brand"
+                  >
+                    <ChevronRight className="h-5 w-5" aria-hidden />
+                  </button>
+                  <span
+                    data-testid="detail-nav-counter"
+                    aria-label={`Image ${navIndex + 1} of ${nav.images.length}`}
+                    className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 border border-line-strong bg-surface/90 px-2 py-0.5 font-mono text-[10.5px] font-semibold uppercase tracking-wider text-ink shadow-[var(--shadow-hard-sm)]"
+                  >
+                    {navIndex + 1} / {nav.images.length}
+                  </span>
+                </>
+              )}
             </div>
 
             {/* Original / upscaled variant switcher */}
@@ -292,7 +376,7 @@ export function ImageDetailDialog({
               </div>
             </DialogHeader>
 
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+            <div ref={metaScrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
               {/* ── batch-worker error banner (failure message + dismiss) ── */}
               {image.error_message && (
                 <section
