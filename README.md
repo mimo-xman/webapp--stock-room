@@ -43,10 +43,10 @@ Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de p
 
 | Chemin | Contenu | Hébergement |
 |---|---|---|
-| `api/` | API Node.js + Express + Mongoose (Sessions/Images, auth double, validation zod, rate limit, pagination/search/filter/sort backend, proxy download, cascade delete, **upscales** : endpoints + filtres + cap serveur) | **Render** (runtime Node) |
-| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used · Adobe Stock », copy icons, modales custom, **affichage des upscales** : preview Original/×N, Mark used / Download / Delete) | **Netlify** |
+| `api/` | API Node.js + Express + Mongoose (Sessions/Images, auth double, validation zod, rate limit, pagination/search/filter/sort backend, proxy download, cascade delete, **upscales** : endpoints + filtres + cap serveur, **`GET /api/images/all`** : toute la librairie en un appel pour l'anti-doublons de l'agent) | **Render** (runtime Node) |
+| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used · Adobe Stock », copy icons, modales custom, **affichage des upscales** : preview Original/×N, Mark used / Download / Delete, **export CSV Adobe Stock** : sélection multi-pages originaux + upscales → fichier `Filename,Title,Keywords,Category` téléchargeable) | **Netlify** |
 | `AGENT_PROMPT.md` | **Le prompt réutilisable** à donner à l'agent (variables à remplacer + prompt Lyra inclus verbatim) | — |
-| `.github/workflows/` | **Jobs d'upscale Real-ESRGAN** : batch quotidien 08:00 Maroc + job manuel image unique | **GitHub Actions** |
+| `.github/workflows/` | **Jobs d'upscale Real-ESRGAN** : batch quotidien 08:00 Maroc + job manuel image unique (réveil auto de l'API Render, logs heartbeat, sortie JPEG prête Adobe Stock) | **GitHub Actions** |
 | `scripts/upscale/` | Scripts Python partagés des jobs (API client, Cloudinary, Real-ESRGAN) | — |
 
 ## Déploiement
@@ -90,10 +90,12 @@ Après déploiement : `https://<service>.onrender.com/` affiche la page de docs 
 ### 4. Utilisation
 
 Copie `AGENT_PROMPT.md`, remplace les `[VARIABLES]` (nombre d'images, liens des 2 APIs, les 2
-clés, liens des repos), et envoie-le à ton agent. Il fait tout : recherche → prompts (Lyra) →
-génération → session → enregistrement → rapport. La webapp te permet ensuite de parcourir,
-trier, filtrer, copier les métadonnées (titre / catégorie / keywords), télécharger les images
-et marquer ce qui a été uploadé sur Adobe Stock (tampon vert).
+clés, liens des repos), et envoie-le à ton agent. Il fait tout : recherche → **anti-doublons
+(`GET /api/images/all` — il vérifie la librairie existante avant de générer)** → prompts
+(Lyra) → génération → session → enregistrement → rapport. La webapp te permet ensuite de
+parcourir, trier, filtrer, copier les métadonnées (titre / catégorie / keywords), télécharger
+les images, marquer ce qui a été uploadé sur Adobe Stock (tampon vert), et **générer le CSV
+d'upload Adobe Stock** pour un lot sélectionné.
 
 ### 5. Upscales — Real-ESRGAN via GitHub Actions
 
@@ -111,7 +113,26 @@ Dans la webapp : section *Upscales* dans le détail d'une image — preview comm
 Original/×N et actions **Mark used / Download / Delete** par variante, chip `×n` sur les
 cartes, filtre « With/Without upscales ».
 
+Détails opérationnels : le job **réveille l'API Render** si elle est en pause (retry 5 min),
+imprime un **timer `⏱ hh:mm:ss` toutes les 5 s** pendant les phases silencieuses (chargement
+du modèle, upscale, upload), sort en **JPEG qualité 95 par défaut** (mêmes dimensions, ~2-4 Mo,
+sous la limite Cloudinary de 10 Mo — la qualité est baissée automatiquement si nécessaire) et
+retente 2× un 502 de téléchargement (service source en cours de réveil) avant de déclarer un
+lien mort.
+
 ➡️ **Guide complet (secrets, inputs, formats, erreurs, quota) : [`docs/UPSCALE.md`](docs/UPSCALE.md)**
+
+### 6. Export CSV Adobe Stock (webapp)
+
+Sur les pages *Images* et *Session* : sélectionne les assets voulus — **originaux et/ou leurs
+upscales** — via les checkboxes (carte = original ; détail = original + chaque variante).
+La sélection **survit aux changements de pages/filtres** (barre flottante en bas), puis le
+bouton **Download CSV** génère le fichier `Filename,Title,Keywords,Category` exactement au
+format de l'upload par CSV d'Adobe Stock (catégorie = code numérique 1-21, filename = basename
+de l'URL de l'asset, keywords cités, doublons de noms renommés automatiquement). Les upscales
+exportées réutilisent les métadonnées de leur image d'origine.
+
+➡️ **Détails + table des catégories : [`docs/CSV_EXPORT.md`](docs/CSV_EXPORT.md)**
 
 ## Règle métier absolue
 
@@ -131,7 +152,7 @@ cd web && npm install && npm run dev
 # Démo visuelle : API + 2 sessions + 16 images pré-remplies
 cd api && node scripts/seed-demo.cjs
 
-# Tests E2E de l'API (81 assertions)
+# Tests E2E de l'API (90 assertions)
 cd api && npm test
 ```
 

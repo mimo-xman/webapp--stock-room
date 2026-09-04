@@ -10,7 +10,7 @@ npm install
 cp .env.example .env          # then edit MONGODB_URI / API_KEY / APP_PASSWORD
 npm start                     # production
 npm run dev                   # dev with in-memory MongoDB (no Atlas needed)
-npm test                      # 81-assertion E2E suite (in-memory MongoDB)
+npm test                      # 90-assertion E2E suite (in-memory MongoDB)
 node scripts/seed-demo.cjs    # demo data (2 sessions, 16 images)
 ```
 
@@ -40,6 +40,7 @@ authentications per IP are counted and blocked (brute-force guard).
 | GET | `/api/sessions/:id` | one session + `imagesCount` / `usedCount` | ✔ |
 | DELETE | `/api/sessions/:id` | delete session **and all its images** | ✔ |
 | GET | `/api/images` | list + filters: `session_id`, `category`, `used_in_adobe_stock`, `quality`, `has_upscales` ∈ true/false, `upscales_lt` = N (images with fewer than N upscales), same pagination/sort as above | ✔ |
+| GET | `/api/images/all` | **every image in one call** — agent dedup check before generating a new batch (lean fields; `?with_links=1` adds `image_link` + `upscales`; newest first, capped at 5000 with `truncated` flag) | ✔ |
 | POST | `/api/images` | register an image (full metadata, validated) | ✔ |
 | GET | `/api/images/:id` | one image (incl. its `upscales[]`) | ✔ |
 | PATCH | `/api/images/:id` | edit any metadata field(s) (e.g. `used_in_adobe_stock`) | ✔ |

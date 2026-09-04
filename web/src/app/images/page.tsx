@@ -14,15 +14,20 @@ import { ImageDetailDialog } from "@/components/app/ImageDetailDialog";
 import { ImageFormDialog } from "@/components/app/ImageFormDialog";
 import { EmptyState } from "@/components/app/EmptyState";
 import { useList, useSessionOptions } from "@/hooks/use-list";
+import { useCsvSelection } from "@/hooks/use-csv-selection";
 import { api } from "@/lib/api";
+import { buildAdobeStockCsv, downloadCsvFile } from "@/lib/csv";
 import { IMAGE_SORTS, CATEGORIES, QUALITIES } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
+import { SelectionBar } from "@/components/app/SelectionBar";
 import type { StockImage } from "@/lib/types";
 
 export default function ImagesPage() {
   const { toast } = useToast();
   const list = useList((p) => api.images.list(p));
   const sessionOptions = useSessionOptions();
+  const csvSel = useCsvSelection();
+  const [csvBuilding, setCsvBuilding] = useState(false);
 
   const [detail, setDetail] = useState<StockImage | null>(null);
   const [editing, setEditing] = useState<StockImage | null>(null);
@@ -90,6 +95,24 @@ export default function ImagesPage() {
       list.reload();
     } catch {
       toast({ variant: "destructive", title: "Delete failed", description: "Try again in a moment." });
+    }
+  }
+
+  /** Build + download the Adobe Stock metadata CSV for the selection
+   *  (originals and/or upscaled variants — selection survives pagination). */
+  function downloadCsv() {
+    setCsvBuilding(true);
+    try {
+      const { csv, rows, warnings } = buildAdobeStockCsv(csvSel.list);
+      downloadCsvFile(csv, `adobe-stock-upload-${new Date().toISOString().slice(0, 10)}.csv`);
+      toast({
+        title: "Adobe Stock CSV downloaded",
+        description: warnings.length
+          ? `${rows} row(s). ⚠ ${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}`
+          : `${rows} row(s) — upload the images to Adobe Stock, then this CSV.`,
+      });
+    } finally {
+      setCsvBuilding(false);
     }
   }
 
@@ -163,10 +186,26 @@ export default function ImagesPage() {
             }
           />
         ) : (
-          <ImageGrid images={images} onOpen={openDetail} onToggleUsed={toggleUsed} thunkKey={thunk} />
+          <ImageGrid
+            images={images}
+            onOpen={openDetail}
+            onToggleUsed={toggleUsed}
+            thunkKey={thunk}
+            selectionFor={(image) => ({
+              selected: csvSel.isSelected(image._id),
+              onToggle: (img) => csvSel.toggle(img),
+            })}
+          />
         )}
 
         <PaginationBar pagination={list.pagination} onChange={list.updateParams} />
+
+        <SelectionBar
+          count={csvSel.count}
+          disabled={csvBuilding}
+          onDownload={downloadCsv}
+          onClear={csvSel.clear}
+        />
       </main>
 
       <ImageDetailDialog
@@ -174,6 +213,7 @@ export default function ImagesPage() {
         onClose={() => setDetail(null)}
         onToggleUsed={toggleUsed}
         onImageUpdate={handleImageUpdate}
+        selection={{ isSelected: csvSel.isSelected, toggle: csvSel.toggle }}
         onEdit={(img) => {
           setDetail(null);
           setEditing(img);

@@ -72,6 +72,8 @@ requis pour un dry-run). Décochez ensuite pour un vrai premier run.
 | `max_upscales_per_image` | surcharge le secret | secret, sinon 1 |
 | `scale` | facteur 2-8 | secret `DEFAULT_SCALE`, sinon 4 |
 | `model` | `RealESRGAN_x4plus` \| `realesr-general-x4v3` \| `RealESRGAN_x2plus` | `RealESRGAN_x4plus` |
+| `output_format` | **jpg** (prêt Adobe Stock, ~2-4 Mo) \| png (lossless, lourd) | `jpg` |
+| `jpeg_quality` | qualité JPEG 80-100 (réduite auto si > limite) | 95 |
 | `max_images` | limite du run (quota Actions) | 5 |
 | `dry_run` | lister sans traiter | false |
 
@@ -79,7 +81,7 @@ requis pour un dry-run). Décochez ensuite pour un vrai premier run.
 
 Manuel uniquement. Inputs : `image_id` (requis, le `_id` MongoDB visible
 dans le détail d'une image dans la webapp), `max_upscales`, `scale`,
-`model`, `dry_run`.
+`model`, `output_format`, `jpeg_quality`, `dry_run`.
 
 Comportement (messages clairs dans les logs et le résumé) :
 
@@ -100,7 +102,7 @@ Chaque variante est ajoutée par le job via `POST /api/images/:id/upscales` :
   "upscales": [
     {
       "_id": "68f2…",              // id de la variante (actions webapp)
-      "url": "https://res.cloudinary.com/<cloud>/image/upload/…/…_x4_1.png",
+      "url": "https://res.cloudinary.com/<cloud>/image/upload/…/…_x4_1.jpg",
       "public_id": "adobe-stock/upscales/<imageId>_x4_1",  // pour le delete Cloudinary
       "scale": 4,
       "model": "RealESRGAN_x4plus",
@@ -164,11 +166,61 @@ Notes techniques :
 - **CPU uniquement** — les runners GitHub standards n'ont pas de GPU ;
   PyTorch est installé via les wheels CPU (`--extra-index-url …/whl/cpu`).
 - Le **tuilage** (`tile=512`) borne la mémoire (runners 7 Go).
-- Formats de sortie : source **jpg → jpg qualité 95** (prêt pour Adobe
-  Stock), png/webp/autre → **png** (lossless). L'alpha est ignoré.
+- **Format de sortie : JPEG par défaut** (voir §6bis) ; png disponible via
+  `--output-format png` / input `output_format` (lossless, lourd). L'alpha est
+  ignoré.
 - `public_id` déterministe `<imageId>_x<scale>_<index>` + `overwrite=true`
   → un re-run après échec partiel reprend proprement (idempotent).
 - Poids des modèles mis en **cache** (`~/.cache/upscale-models`, ~65 Mo).
+- **Logs heartbeat** — pendant chaque phase longue et silencieuse (réveil de
+  l'API, téléchargement/chargement du modèle, upscale, upload), un timer
+  `⏱ hh:mm:ss` s'imprime toutes les 5 s (`HEARTBEAT_SECONDS` pour changer
+  l'intervalle). Un run de 10+ min sans aucune sortie ressemble à un hang :
+  ces lignes prouvent que le job vit et permettent de suivre l'avancement —
+  indispensable pour RealESRGAN ×4 qui met ~2 min par tuile sans log.
+- **Réveil automatique de l'API** — le job commence par `wait_until_ready()` :
+  le service Render (plan gratuit) est mis en pause après inactivité ; chaque
+  tentative de réveil est logguée (`· réveil de l'API…`, `✓ API prête`),
+  jusqu'à 5 min. Le **téléchargement d'une image** retente aussi 2× un 502
+  avec 20 s de pause (la SOURCE de l'image — souvent un autre service Render
+  — peut elle aussi être en train de se réveiller) avant de déclarer le lien
+  réellement mort.
+
+---
+
+## 6bis. Limite de 10 Mo par fichier Cloudinary — politique JPEG
+
+Le plan gratuit Cloudinary **plafonne chaque fichier image à 10 Mo**. Un ×4
+PNG lossless (ex. 3456×6144) dépasse facilement cette limite (~20 Mo), et
+l'upload échoue avec `File size too large. Got 19709928. Maximum is 10485760.`
+Ce n'est PAS contournable côté transport : l'upload par morceaux
+(`upload_chunked`/`upload_large`) ne s'applique pas aux images sur ce plan et
+la limite est appliquée côté serveur de toute façon.
+
+La bonne réponse est **le format, pas la réduction** :
+
+- les soumissions photo **Adobe Stock sont de toute façon des JPEG** (le PNG
+  ne sert que pour les illustrations/vecteurs) ;
+- un JPEG qualité 95 aux **mêmes dimensions** (3456×6144) pèse ~2-4 Mo ;
+- aucun pixel n'est perdu : **seule la compression change, jamais la taille**.
+
+Politique appliquée par le job :
+
+1. sortie **JPEG qualité 95** par défaut (`--output-format jpg`,
+   `UPSCALE_JPEG_QUALITY`, input de workflow `jpeg_quality`) ;
+2. si le JPEG dépasse quand même la limite (`CLOUDINARY_MAX_UPLOAD_BYTES`,
+   défaut 10 Mo − 0,5 Mo de marge), la qualité est **baissée automatiquement
+   par pas de 5** (95 → 90 → 85 → 80) avec un log à chaque ré-encodage ;
+3. si même en qualité 80 la limite explose (cas extrême) → message d'erreur
+   clair avec les options (réduire `--scale`, ou changer d'hébergement) ;
+4. `--output-format png` reste possible pour un besoin lossless explicite —
+   si le PNG dépasse la limite, l'erreur explique pourquoi le JPEG est le bon
+   choix ici.
+
+> Alternatives si vous voulez un jour stocker des lossless géants :
+> Cloudflare R2 (10 Go gratuits, pas de limite par fichier), Backblaze B2,
+> ou un plan payant Cloudinary. Le plan gratuit Actions/Render/Cloudinary
+> actuel couvre bien le flux JPEG.
 
 ---
 
@@ -178,9 +230,12 @@ Notes techniques :
 |---|---|---|
 | Secrets manquants / mauvais | message listant exactement ce qui manque | ❌ exit 1 |
 | 401 API | « vérifiez le secret ASSET_API_KEY (clé de l'agent) » | ❌ exit 1 |
-| API injoignable | « vérifiez ASSET_API_URL + cold start Render ~30-60 s » | ❌ exit 1 |
+| **API en pause (Render)** | réveil automatique (5 min max, une ligne par tentative) | ✅ ou ❌ après 5 min |
+| API injoignable | « vérifiez ASSET_API_URL… ouvrez l'URL dans un navigateur » | ❌ exit 1 |
 | Image introuvable (single) | message + piste de vérification | ❌ exit 1 |
+| **502 à la source (service qui se réveille)** | 2 retry espacés de 20 s, puis « ⏭️ ignorée » seulement si vraiment morte | ✅ (comptée ignorée) |
 | Lien source mort (éphémère) | « ⏭️ ignorée — lien expiré » | ✅ (comptée ignorée) |
+| **Fichier > limite Cloudinary (10 Mo)** | JPEG re-encodé qualité 95→80 automatiquement ; sinon message clair | ❌ exit 1 (rare) |
 | Limite d'upscales atteinte | « 🛑 STOP — déjà N upscales, max M » | ✅ exit 0 |
 | Échec d'une image (batch) | message + résumé ; les autres continuent | ❌ exit 1 |
 | Rien à traiter | « ✓ aucune image éligible » | ✅ exit 0 |

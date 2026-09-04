@@ -263,6 +263,34 @@ async function main() {
     r = await call('GET', `/api/sessions/${s1}`, K);
     ok('session imagesCount reflects inserts', r.json.data.imagesCount === 13);
 
+    // ── /api/images/all (agent dedup helper) ──────────────────────────────
+    console.log('─ images/all (dedup helper)');
+    // NB: the 401 check goes LAST and is followed by a short pause: a failed
+    // auth re-arms the brute-force guard (400 ms block) and would 429 the
+    // next fast calls otherwise.
+    r = await call('GET', '/api/images/all', K);
+    ok('images/all → all 16 images + count, not truncated', r.status === 200 && r.json.count === 16 && r.json.truncated === false && r.json.data.length === 16, r.json && { count: r.json.count, truncated: r.json.truncated });
+    ok('images/all lean projection — no image_link, no upscales',
+      r.json.data.every((d) => d.image_link === undefined && d.upscales === undefined));
+    ok('images/all carries the dedup fields (title/category/keywords/prompt)',
+      r.json.data.every((d) => typeof d.title === 'string' && typeof d.category === 'string' && Array.isArray(d.keywords) && typeof d.prompt === 'string'));
+    ok('images/all ids are 24-hex strings', r.json.data.every((d) => /^[0-9a-f]{24}$/.test(d._id)));
+    ok('images/all newest first (last insert on top)', r.json.data[0].title === 'Beta asset 32', r.json.data.slice(0, 2).map((d) => d.title));
+
+    r = await call('GET', '/api/images/all?with_links=1', K);
+    ok('images/all?with_links=1 → image_link + upscales present',
+      r.status === 200 && r.json.data.every((d) => typeof d.image_link === 'string' && Array.isArray(d.upscales)));
+
+    r = await call('GET', '/api/images/all?with_links=banana', K);
+    ok('images/all unknown with_links value → 200 (ignored, lean)', r.status === 200 && r.json.data.every((d) => d.image_link === undefined));
+
+    r = await call('GET', '/api/images/all', { password: APP_PASSWORD });
+    ok('images/all with app password → 200 (dual credential)', r.status === 200 && r.json.count === 16);
+
+    r = await call('GET', '/api/images/all');
+    ok('images/all without credentials → 401', r.status === 401 && r.json.error.code === 'AUTH_REQUIRED');
+    await new Promise((resolve) => setTimeout(resolve, 450)); // let the brute-force block expire
+
     // ── update (mark/unmark) ────────────────────────────────────────────────
     console.log('─ updates');
     r = await call('PATCH', `/api/images/${img1}`, { password: APP_PASSWORD, body: { used_in_adobe_stock: true } });

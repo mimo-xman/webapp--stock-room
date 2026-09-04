@@ -9,13 +9,15 @@ interface StampToggleProps {
   className?: string;
   /** Compact variant for dense rows (e.g. upscale entries). */
   small?: boolean;
+  /** Optional accessible name (defaults to the title attribute). */
+  label?: string;
 }
 
 /**
  * The signature control — a rubber-stamp style mark/unmark button
  * for "used in Adobe Stock".
  */
-export function StampToggle({ used, onToggle, className, small = false }: StampToggleProps) {
+export function StampToggle({ used, onToggle, className, small = false, label }: StampToggleProps) {
   return (
     <button
       type="button"
@@ -24,6 +26,7 @@ export function StampToggle({ used, onToggle, className, small = false }: StampT
         onToggle();
       }}
       aria-pressed={used}
+      aria-label={label}
       className={cn(
         "flex items-center border-2 font-display font-bold uppercase tracking-widest transition-all focus-visible:outline-2 focus-visible:outline-brand",
         small ? "gap-1 px-2 py-1 text-[10.5px]" : "gap-2 px-3.5 py-1.5 text-xs",

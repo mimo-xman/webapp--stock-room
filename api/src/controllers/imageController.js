@@ -5,7 +5,7 @@ const { Readable } = require('node:stream');
 const Image = require('../models/Image');
 const Session = require('../models/Session');
 const { CONFIG } = require('../config');
-const { IMAGE_SORT_FIELDS, ADOBE_CATEGORIES, MONGODB_OBJECT_ID_RE, UPSCALE_HARD_MAX } = require('../constants');
+const { IMAGE_SORT_FIELDS, ADOBE_CATEGORIES, MONGODB_OBJECT_ID_RE, UPSCALE_HARD_MAX, IMAGES_ALL_MAX } = require('../constants');
 const {
   escapeRegex,
   parseCommonQuery,
@@ -149,6 +149,65 @@ async function create(req, res, next) {
     }
     const image = await Image.create(payload);
     res.status(201).json({ data: toPlain(image) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── all images (dedup helper for the generation agent) ───────────────────
+
+/**
+ * GET /api/images/all[?with_links=1]
+ *
+ * EVERY image in one response — the generation agent calls it BEFORE
+ * preparing a batch to avoid producing near-duplicates (same subject +
+ * same composition) of what is already stored. Lean projection by default
+ * (title, category, keywords, prompt…); `with_links=1` also returns
+ * image_link + the upscales array. Newest first; hard-capped at
+ * IMAGES_ALL_MAX with an explicit `truncated` flag.
+ */
+async function listAll(req, res, next) {
+  try {
+    const withLinks = ['true', '1'].includes(String(req.query.with_links || '').trim().toLowerCase());
+
+    const projection = {
+      session_id: 1,
+      title: 1,
+      category: 1,
+      keywords: 1,
+      prompt: 1,
+      ratio: 1,
+      quality: 1,
+      used_in_adobe_stock: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    if (withLinks) {
+      projection.image_link = 1;
+      projection.upscales = 1;
+    }
+
+    const docs = await Image.find({})
+      .select(projection)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(IMAGES_ALL_MAX + 1)
+      .lean();
+
+    const truncated = docs.length > IMAGES_ALL_MAX;
+    const data = docs.slice(0, IMAGES_ALL_MAX).map((d) => ({
+      ...d,
+      _id: String(d._id),
+      session_id: String(d.session_id),
+    }));
+
+    res.json({
+      data,
+      count: data.length,
+      truncated,
+      ...(truncated
+        ? { note: `Result truncated at ${IMAGES_ALL_MAX} images — page through GET /api/images?limit=100&page=N for the rest.` }
+        : {}),
+    });
   } catch (err) {
     next(err);
   }
@@ -473,6 +532,7 @@ async function downloadUpscale(req, res, next) {
 
 module.exports = {
   list,
+  listAll,
   create,
   getOne,
   update,

@@ -70,6 +70,13 @@ def parse_args(argv):
     )
     parser.add_argument("--cloudinary-folder", default="", help="Dossier Cloudinary (défaut : adobe-stock/upscales)")
     parser.add_argument("--model-dir", default="", help="Dossier de cache des modèles (défaut : ~/.cache/upscale-models)")
+    parser.add_argument(
+        "--output-format",
+        default="",
+        choices=["", "jpg", "png"],
+        help="Format de sortie : jpg (défaut — prêt pour Adobe Stock, ~2-4 Mo) ou png (lossless, lourd)",
+    )
+    parser.add_argument("--jpeg-quality", default="", help="Qualité JPEG 80-100 (défaut : 95, réduite auto si > limite Cloudinary)")
     parser.add_argument("--dry-run", action="store_true", help="Lister les images éligibles sans rien faire")
     return parser.parse_args(argv)
 
@@ -83,6 +90,12 @@ def main(argv=None) -> int:
         return handle_fatal(e, "configuration du job")
 
     api = AssetApi(config.api_url, config.api_key)
+
+    # ── wake the API up first (Render free tier spins services down) ──
+    try:
+        api.wait_until_ready()
+    except JobError as e:
+        return handle_fatal(e, "réveil de l'API")
 
     # ── eligibility listing (fail fast, before any heavy import) ──
     try:

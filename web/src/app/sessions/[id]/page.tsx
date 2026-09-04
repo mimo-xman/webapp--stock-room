@@ -17,10 +17,13 @@ import { ImageFormDialog } from "@/components/app/ImageFormDialog";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { EmptyState } from "@/components/app/EmptyState";
 import { useList, useSessionOptions } from "@/hooks/use-list";
+import { useCsvSelection } from "@/hooks/use-csv-selection";
 import { api, ApiError } from "@/lib/api";
+import { buildAdobeStockCsv, downloadCsvFile } from "@/lib/csv";
 import { formatDateTime } from "@/lib/format";
 import { IMAGE_SORTS } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
+import { SelectionBar } from "@/components/app/SelectionBar";
 import type { Session, StockImage } from "@/lib/types";
 
 export default function SessionDetailPage() {
@@ -35,6 +38,8 @@ export default function SessionDetailPage() {
     filters: { session_id: id },
   });
   const sessionOptions = useSessionOptions();
+  const csvSel = useCsvSelection();
+  const [csvBuilding, setCsvBuilding] = useState(false);
 
   const [detail, setDetail] = useState<StockImage | null>(null);
   const [editing, setEditing] = useState<StockImage | null>(null);
@@ -92,6 +97,24 @@ export default function SessionDetailPage() {
       list.reload();
     } catch {
       toast({ variant: "destructive", title: "Delete failed", description: "Try again in a moment." });
+    }
+  }
+
+  /** Build + download the Adobe Stock metadata CSV for the selection
+   *  (originals and/or upscaled variants — selection survives pagination). */
+  function downloadCsv() {
+    setCsvBuilding(true);
+    try {
+      const { csv, rows, warnings } = buildAdobeStockCsv(csvSel.list);
+      downloadCsvFile(csv, `adobe-stock-upload-${new Date().toISOString().slice(0, 10)}.csv`);
+      toast({
+        title: "Adobe Stock CSV downloaded",
+        description: warnings.length
+          ? `${rows} row(s). ⚠ ${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}`
+          : `${rows} row(s) — upload the images to Adobe Stock, then this CSV.`,
+      });
+    } finally {
+      setCsvBuilding(false);
     }
   }
 
@@ -208,10 +231,26 @@ export default function SessionDetailPage() {
             }
           />
         ) : (
-          <ImageGrid images={images} onOpen={openDetail} onToggleUsed={toggleUsed} thunkKey={thunk} />
+          <ImageGrid
+            images={images}
+            onOpen={openDetail}
+            onToggleUsed={toggleUsed}
+            thunkKey={thunk}
+            selectionFor={(image) => ({
+              selected: csvSel.isSelected(image._id),
+              onToggle: (img) => csvSel.toggle(img),
+            })}
+          />
         )}
 
         <PaginationBar pagination={list.pagination} onChange={list.updateParams} />
+
+        <SelectionBar
+          count={csvSel.count}
+          disabled={csvBuilding}
+          onDownload={downloadCsv}
+          onClear={csvSel.clear}
+        />
       </main>
 
       <ImageDetailDialog
@@ -219,6 +258,7 @@ export default function SessionDetailPage() {
         onClose={() => setDetail(null)}
         onToggleUsed={toggleUsed}
         onImageUpdate={handleImageUpdate}
+        selection={{ isSelected: csvSel.isSelected, toggle: csvSel.toggle }}
         onEdit={(img) => {
           setDetail(null);
           setEditing(img);

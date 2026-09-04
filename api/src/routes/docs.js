@@ -21,6 +21,7 @@ const endpointRows = [
   ['GET', '/api/sessions/:id', 'One session + imagesCount / usedCount', true],
   ['DELETE', '/api/sessions/:id', 'Delete a session and ALL its images (cascade)', true],
   ['GET', '/api/images', 'List images — pagination, search, filters, sort', true],
+  ['GET', '/api/images/all', 'Every image in one call — agent dedup check before generating (lean fields; ?with_links=1 adds links + upscales)', true],
   ['POST', '/api/images', 'Register a generated image (full metadata)', true],
   ['GET', '/api/images/:id', 'One image (incl. its upscales)', true],
   ['PATCH', '/api/images/:id', 'Edit image metadata (incl. used_in_adobe_stock)', true],

@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Pencil, Trash2, Download, ImageOff, ArrowRight, ZoomIn, ExternalLink } from "lucide-react";
+import { Check, FileDown, Pencil, Trash2, Download, ImageOff, ArrowRight, ZoomIn, ExternalLink } from "lucide-react";
 import { CopyButton } from "./CopyButton";
 import { StampToggle } from "./StampToggle";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -37,6 +37,12 @@ interface ImageDetailDialogProps {
    *  so the page can refresh its detail + list state. */
   onImageUpdate: (image: StockImage) => void;
   sessionTitle?: string;
+  /** CSV export selection — when provided, the dialog adds selection
+   *  controls: the original in the footer + one toggle per upscale row. */
+  selection?: {
+    isSelected: (imageId: string, variantId: string) => boolean;
+    toggle: (image: StockImage, upscale?: Upscale) => void;
+  };
 }
 
 const VARIANT_ORIGINAL = "original";
@@ -49,6 +55,7 @@ export function ImageDetailDialog({
   onDelete,
   onImageUpdate,
   sessionTitle,
+  selection,
 }: ImageDetailDialogProps) {
   const [broken, setBroken] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -304,6 +311,29 @@ export function ImageDetailDialog({
                         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                           <button
                             type="button"
+                            role="checkbox"
+                            aria-checked={selection?.isSelected(image._id, u._id) ?? false}
+                            aria-label={`Add the ×${u.scale} variant to the Adobe Stock CSV`}
+                            title="Add to the Adobe Stock CSV selection"
+                            disabled={!selection}
+                            onClick={() => selection?.toggle(image, u)}
+                            className={cn(
+                              "flex h-[26px] items-center gap-1 border px-2 font-display text-[10.5px] font-semibold uppercase tracking-wider transition-colors focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-50",
+                              selection?.isSelected(image._id, u._id)
+                                ? "border-brand bg-brand text-white"
+                                : "border-line-strong bg-surface text-ink hover:border-brand hover:text-brand"
+                            )}
+                            data-testid="select-upscale"
+                          >
+                            {selection?.isSelected(image._id, u._id) ? (
+                              <Check className="h-3 w-3" aria-hidden />
+                            ) : (
+                              <FileDown className="h-3 w-3" aria-hidden />
+                            )}
+                            CSV
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => {
                               setVariant(u._id);
                               setBroken(false);
@@ -334,14 +364,13 @@ export function ImageDetailDialog({
                             <ExternalLink className="h-3 w-3" aria-hidden />
                             Cloudinary
                           </a>
-                          <button
-                            type="button"
-                            onClick={() => toggleUpscaleUsed(u)}
+                          <StampToggle
+                            used={Boolean(u.used_in_adobe_stock)}
+                            small
+                            onToggle={() => toggleUpscaleUsed(u)}
                             className="ml-auto"
-                            aria-label={`Mark the ×${u.scale} variant as used in Adobe Stock`}
-                          >
-                            <StampToggle used={Boolean(u.used_in_adobe_stock)} small onToggle={() => toggleUpscaleUsed(u)} />
-                          </button>
+                            label={`Mark the ×${u.scale} variant as used in Adobe Stock`}
+                          />
                           <button
                             type="button"
                             onClick={() => setConfirmUpscaleDelete(u)}
@@ -377,6 +406,30 @@ export function ImageDetailDialog({
             </div>
 
             <div className="flex flex-wrap items-center gap-2 border-t border-line bg-paper p-3">
+              {selection && (
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={selection.isSelected(image._id, "original")}
+                  aria-label="Add the original image to the Adobe Stock CSV"
+                  title="Add the ORIGINAL image to the Adobe Stock CSV selection"
+                  onClick={() => selection.toggle(image)}
+                  className={cn(
+                    "flex h-[34px] items-center gap-1.5 border px-3 font-display text-xs font-semibold uppercase tracking-widest transition-colors focus-visible:outline-2 focus-visible:outline-brand",
+                    selection.isSelected(image._id, "original")
+                      ? "border-brand bg-brand text-white"
+                      : "border-line-strong bg-surface text-ink hover:border-brand hover:text-brand"
+                  )}
+                  data-testid="select-original-dialog"
+                >
+                  {selection.isSelected(image._id, "original") ? (
+                    <Check className="h-3.5 w-3.5" aria-hidden />
+                  ) : (
+                    <FileDown className="h-3.5 w-3.5" aria-hidden />
+                  )}
+                  CSV
+                </button>
+              )}
               <StampToggle used={image.used_in_adobe_stock} onToggle={() => onToggleUsed(image)} />
               <button
                 type="button"

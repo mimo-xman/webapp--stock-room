@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 
@@ -35,11 +36,66 @@ class LimitReached(ImageSkipped):
 
 
 def log(msg: str) -> None:
-    print(msg, flush=True)
+    with _STDOUT_LOCK:
+        print(msg, flush=True)
 
 
 def die(msg: str) -> "JobError":
     return JobError(msg)
+
+
+# ── heartbeat (GitHub Actions expects regular log output) ─────────────────
+
+HEARTBEAT_INTERVAL = float(os.environ.get("HEARTBEAT_SECONDS", "5") or 5)
+_STDOUT_LOCK = threading.Lock()
+
+
+class Heartbeat:
+    """Timer imprimé toutes les `interval` secondes pendant une phase longue
+    et silencieuse (téléchargement/chargement du modèle, upscale, upload).
+
+    GitHub Actions n'interrompt pas un job silencieux, mais un run de 10+ min
+    sans aucune sortie ressemble à un hang : ces lignes ⏱ hh:mm:ss prouvent
+    que le processus vit et permettent de suivre l'avancement.
+
+    Usage :
+        with Heartbeat("upscale ×4 en cours"):
+            …
+    """
+
+    def __init__(self, label: str, interval: float | None = None):
+        self.label = label
+        self.interval = interval if interval and interval > 0 else HEARTBEAT_INTERVAL
+        self._started = 0.0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> "Heartbeat":
+        self._started = time.monotonic()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self.interval + 2)
+        return False
+
+    def _run(self) -> None:
+        # Première ligne immédiate (00:00:00), puis une par intervalle —
+        # la sortie du contexte stoppe le thread (Event.wait → True).
+        while True:
+            self._print_elapsed()
+            if self._stop.wait(self.interval):
+                return
+
+    def _print_elapsed(self) -> None:
+        elapsed = int(time.monotonic() - self._started)
+        h, rem = divmod(elapsed, 3600)
+        m, s = divmod(rem, 60)
+        with _STDOUT_LOCK:
+            print(f"⏱ {h:02d}:{m:02d}:{s:02d} · {self.label}", flush=True)
 
 
 # ── configuration ────────────────────────────────────────────────────────────
@@ -72,6 +128,17 @@ DEFAULT_SCALE = 4          # mirrors the documented secret default
 DEFAULT_MAX_IMAGES = 5     # GitHub Actions free quota friendly
 DEFAULT_CLOUDINARY_FOLDER = "adobe-stock/upscales"
 
+# ── output format policy ──────────────────────────────────────────────────
+# Upscales are destined for Adobe Stock: photo submissions there are JPEG.
+# A ×4 PNG (lossless) easily passes 10 Mo — Cloudinary's free-plan per-file
+# cap — while the SAME dimensions in JPEG q95 weigh ~2-4 Mo. JPEG is therefore
+# the DEFAULT; PNG stays available for explicit lossless needs (--output-format png).
+DEFAULT_OUTPUT_FORMAT = "jpg"
+DEFAULT_JPEG_QUALITY = 95
+JPEG_QUALITY_FLOOR = 80
+CLOUDINARY_FREE_MAX_BYTES = 10 * 1024 * 1024   # 10 Mo — free plan per-file limit
+UPLOAD_SIZE_SAFETY = 512 * 1024                # stay safely under the account limit
+
 
 @dataclass
 class JobConfig:
@@ -88,6 +155,9 @@ class JobConfig:
     model_dir: str
     dry_run: bool = False
     run_id: str = ""
+    output_format: str = DEFAULT_OUTPUT_FORMAT      # "jpg" (stock-ready) | "png" (lossless)
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY         # 80-100, stepped down if > max_upload_bytes
+    max_upload_bytes: int = CLOUDINARY_FREE_MAX_BYTES - UPLOAD_SIZE_SAFETY
 
 
 def _parse_int(value, name, minimum, maximum):
@@ -133,6 +203,24 @@ def build_config(args) -> JobConfig:
             f"Modèle inconnu : {model!r} — modèles supportés : {', '.join(MODEL_REGISTRY)}"
         )
 
+    output_format = (
+        getattr(args, "output_format", None) or os.environ.get("UPSCALE_OUTPUT_FORMAT") or DEFAULT_OUTPUT_FORMAT
+    ).strip().lower()
+    if output_format not in ("jpg", "png"):
+        raise JobError(f"output_format doit valoir « jpg » ou « png » — valeur reçue : {output_format!r}")
+
+    jpeg_quality = _parse_int(
+        getattr(args, "jpeg_quality", None) or os.environ.get("UPSCALE_JPEG_QUALITY") or DEFAULT_JPEG_QUALITY,
+        "jpeg_quality / UPSCALE_JPEG_QUALITY", JPEG_QUALITY_FLOOR, 100,
+    )
+
+    max_upload_raw = os.environ.get("CLOUDINARY_MAX_UPLOAD_BYTES", "").strip()
+    max_upload_bytes = CLOUDINARY_FREE_MAX_BYTES - UPLOAD_SIZE_SAFETY
+    if max_upload_raw:
+        max_upload_bytes = _parse_int(
+            max_upload_raw, "CLOUDINARY_MAX_UPLOAD_BYTES", 1_000_000, 200_000_000
+        )
+
     cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME", "").strip()
     cloud_key = os.environ.get("CLOUDINARY_API_KEY", "").strip()
     cloud_secret = os.environ.get("CLOUDINARY_API_SECRET", "").strip()
@@ -164,6 +252,9 @@ def build_config(args) -> JobConfig:
         or os.environ.get("UPSCALE_MODEL_DIR", os.path.expanduser("~/.cache/upscale-models")),
         dry_run=bool(getattr(args, "dry_run", False)),
         run_id=os.environ.get("GITHUB_RUN_ID", ""),
+        output_format=output_format,
+        jpeg_quality=jpeg_quality,
+        max_upload_bytes=max_upload_bytes,
     )
 
 
@@ -218,6 +309,40 @@ class AssetApi:
             )
         return body
 
+    # ── warm-up (Render free tier spins services down) ──
+
+    def wait_until_ready(self, total_timeout: float = 300, poll: float = 10, path: str = "/health"):
+        """Réveille l'API si elle est en pause et attend qu'elle réponde.
+
+        À appeler AVANT tout vrai travail : un service Render endormi met
+        ~30-90 s à redémarrer, et les premières requêtes échouent sinon
+        (connexion refusée, timeout, 502). Chaque tentative est logguée."""
+        import requests  # lazy
+
+        started = time.monotonic()
+        attempt = 0
+        log("· réveil de l'API (un service Render en pause redémarre en ~30-90 s)…")
+        while True:
+            attempt += 1
+            detail = ""
+            try:
+                resp = requests.get(f"{self.base}{path}", timeout=self.timeout)
+                if 200 <= resp.status_code < 300:
+                    log(f"✓ API prête (tentative {attempt}, {time.monotonic() - started:.0f}s)")
+                    return
+                detail = f"HTTP {resp.status_code}"
+            except requests.RequestException as e:
+                detail = type(e).__name__
+            elapsed = time.monotonic() - started
+            if elapsed >= total_timeout:
+                raise JobError(
+                    f"L'API {self.base} ne répond pas après {attempt} tentative(s) "
+                    f"({int(elapsed)}s) — le service est probablement arrêté. "
+                    "Ouvrez cette URL dans un navigateur pour le redémarrer, puis relancez le workflow."
+                )
+            log(f"  tentative {attempt} : {detail} — nouvel essai dans {int(poll)}s…")
+            time.sleep(poll)
+
     # ── endpoints ──
 
     def get_image(self, image_id: str):
@@ -253,10 +378,23 @@ class AssetApi:
             page += 1
         return collected[:limit]
 
-    def download_image(self, image_id: str):
+    def download_image(self, image_id: str, wake_retries: int = 2, wake_backoff: float = 20):
         """Fetch the ORIGINAL image bytes through the API download proxy.
-        Returns (bytes, content_type). Raises ImageSkipped on dead links."""
+        Returns (bytes, content_type). Raises ImageSkipped on dead links.
+
+        A 502 often just means the ORIGIN service (the image host — typically
+        another Render free-tier service) is waking up: we retry before
+        declaring the link dead."""
         resp = self._request("GET", f"/api/images/{image_id}/download")
+        attempt = 0
+        while resp.status_code == 502 and attempt < wake_retries:
+            attempt += 1
+            log(
+                f"· 502 de la source — le service d'origine se réveille peut-être "
+                f"(Render) ; nouvel essai dans {int(wake_backoff)}s ({attempt}/{wake_retries})…"
+            )
+            time.sleep(wake_backoff)
+            resp = self._request("GET", f"/api/images/{image_id}/download")
         if resp.status_code == 502:
             body = {}
             try:
@@ -351,16 +489,17 @@ def ensure_model(model_name: str, model_dir: str) -> str:
 
     tmp_path = path + ".part"
     try:
-        with requests.get(spec["url"], stream=True, timeout=120) as r:
-            r.raise_for_status()
-            total = int(r.headers.get("Content-Length") or 0)
-            done = 0
-            with open(tmp_path, "wb") as fh:
-                for chunk in r.iter_content(chunk_size=1 << 20):
-                    fh.write(chunk)
-                    done += len(chunk)
-            if total and done != total:
-                raise RuntimeError(f"téléchargement incomplet ({done}/{total} octets)")
+        with Heartbeat(f"téléchargement du modèle {model_name}"):
+            with requests.get(spec["url"], stream=True, timeout=120) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("Content-Length") or 0)
+                done = 0
+                with open(tmp_path, "wb") as fh:
+                    for chunk in r.iter_content(chunk_size=1 << 20):
+                        fh.write(chunk)
+                        done += len(chunk)
+                if total and done != total:
+                    raise RuntimeError(f"téléchargement incomplet ({done}/{total} octets)")
         os.replace(tmp_path, path)
     except Exception as e:
         if os.path.exists(tmp_path):
@@ -400,15 +539,16 @@ class RealEsrganUpscaler:
         torch.set_num_threads(os.cpu_count() or 2)
         log(f"· chargement du modèle {self.model_name} (CPU, {os.cpu_count() or 2} threads)…")
         try:
-            self._upsampler = RealESRGANer(
-                scale=netscale,
-                model_path=self.model_path,
-                model=model,
-                tile=512,          # bounded memory on 2-core / 7 GB runners
-                tile_pad=32,
-                pre_pad=0,
-                half=False,         # CPU → fp32
-            )
+            with Heartbeat(f"chargement du modèle {self.model_name}"):
+                self._upsampler = RealESRGANer(
+                    scale=netscale,
+                    model_path=self.model_path,
+                    model=model,
+                    tile=512,          # bounded memory on 2-core / 7 GB runners
+                    tile_pad=32,
+                    pre_pad=0,
+                    half=False,         # CPU → fp32
+                )
         except Exception as e:
             raise JobError(
                 f"Chargement du modèle Real-ESRGAN échoué — {e} "
@@ -416,8 +556,17 @@ class RealEsrganUpscaler:
             )
         return self._upsampler
 
-    def upscale(self, in_path: str, out_path: str, outscale: int):
-        """Upscale one image file. Returns (width, height) of the output."""
+    def upscale(self, in_path: str, out_path: str, outscale: int, *,
+                output_format: str = DEFAULT_OUTPUT_FORMAT,
+                jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+                max_bytes: int | None = None):
+        """Upscale one image file → JPEG (default, stock-ready) or PNG.
+
+        Returns (width, height) of the output. When `max_bytes` is set and the
+        JPEG still exceeds it, the quality is stepped down (e.g. 95 → 90 → 85 →
+        80) — Cloudinary's free plan caps each file at 10 Mo, and Adobe Stock
+        photo submissions are JPEG anyway. Dimensions NEVER change: only the
+        compression is adjusted."""
         import cv2  # lazy
 
         image = cv2.imread(in_path, cv2.IMREAD_UNCHANGED)
@@ -433,40 +582,62 @@ class RealEsrganUpscaler:
         upsampler = self._load()
         started = time.monotonic()
         try:
-            output, _ = upsampler.enhance(image, outscale=outscale)
+            with Heartbeat(f"upscale ×{outscale} en cours ({self.model_name})"):
+                output, _ = upsampler.enhance(image, outscale=outscale)
         except Exception as e:
             raise JobError(f"Real-ESRGAN a échoué sur cette image — {e}")
 
-        ok, buf = cv2.imencode(ext_for(out_path), output, write_params(out_path))
-        if not ok:
-            raise JobError(f"écriture impossible de {out_path}")
+        # Keep the file extension consistent with the encoded format.
+        root, _ = os.path.splitext(out_path)
+        out_path = root + (".jpg" if output_format == "jpg" else ".png")
+
+        buf = encode_image(output, output_format, jpeg_quality)
+        if output_format == "jpg" and max_bytes and buf.nbytes > max_bytes and jpeg_quality > JPEG_QUALITY_FLOOR:
+            q = jpeg_quality
+            while q > JPEG_QUALITY_FLOOR and buf.nbytes > max_bytes:
+                q = max(JPEG_QUALITY_FLOOR, q - 5)
+                log(
+                    f"· JPEG {format_size(buf.nbytes)} > limite {format_size(max_bytes)} "
+                    f"— ré-encodage en qualité {q}…"
+                )
+                buf = encode_image(output, output_format, q)
+        if max_bytes and buf.nbytes > max_bytes:
+            advice = (
+                f"Même en JPEG qualité {JPEG_QUALITY_FLOOR} la sortie dépasse la limite "
+                "d'upload Cloudinary — réduisez --scale, ou augmentez le secret "
+                "CLOUDINARY_MAX_UPLOAD_BYTES si votre plan le permet."
+                if output_format == "jpg" else
+                "Le PNG (lossless) devient très lourd en ×4 : gardez le format JPEG "
+                "(--output-format jpg, par défaut) — mêmes dimensions, ~2-4 Mo, et "
+                "c'est le format standard des soumissions photo Adobe Stock."
+            )
+            raise JobError(
+                f"la sortie pèse {format_size(buf.nbytes)} — la limite d'upload est "
+                f"{format_size(max_bytes)}. {advice}"
+            )
         with open(out_path, "wb") as fh:
             fh.write(buf.tobytes())
 
         h, w = output.shape[:2]
-        log(f"· upscale ×{outscale} terminé en {time.monotonic() - started:.1f}s → {w}×{h}px")
+        log(
+            f"· upscale ×{outscale} terminé en {time.monotonic() - started:.1f}s → "
+            f"{w}×{h}px ({output_format}, {format_size(buf.nbytes)})"
+        )
         return w, h
 
 
-# Output format policy: jpg source → jpg (quality 95, stock-friendly size),
-# png/webp/anything else → png (lossless).
-def output_ext_for_content_type(content_type: str) -> str:
-    if content_type in ("image/jpeg", "image/jpg"):
-        return ".jpg"
-    return ".png"
-
-
-def ext_for(path: str) -> str:
-    ext = os.path.splitext(path)[1].lower()
-    return ext if ext in (".jpg", ".png") else ".png"
-
-
-def write_params(path: str):
+# Output format: JPEG by default (stock-ready, and small enough for Cloudinary's
+# free 10 Mo per-file cap); PNG available for explicit lossless needs.
+def encode_image(output, output_format: str, jpeg_quality: int):
+    """Encode the upscaled ndarray → (jpg | png) buffer via OpenCV."""
     import cv2  # lazy
 
-    if os.path.splitext(path)[1].lower() == ".jpg":
-        return [int(cv2.IMWRITE_JPEG_QUALITY), 95]
-    return []
+    ext = ".jpg" if output_format == "jpg" else ".png"
+    params = [int(cv2.IMWRITE_JPEG_QUALITY), int(jpeg_quality)] if output_format == "jpg" else []
+    ok, buf = cv2.imencode(ext, output, params)
+    if not ok:
+        raise JobError(f"encodage {output_format} impossible (image trop grande ?)")
+    return buf
 
 
 # ── per-image pipeline (shared by batch.py and single.py) ────────────────────
@@ -494,26 +665,34 @@ def process_image(config: JobConfig, api: AssetApi, upscaler: RealEsrganUpscaler
     log(f"→ {title} [{image_id}] ({current}/{config.max_upscales} upscales)")
 
     # 1. download the original through the API proxy
-    data, content_type = api.download_image(image_id)
+    with Heartbeat(f"téléchargement de l'image source [{image_id}]"):
+        data, content_type = api.download_image(image_id)
     if len(data) < 1000:
         raise ImageSkipped(f"fichier source trop petit ou vide ({len(data)} octets)")
 
-    # 2. upscale in a temp dir
+    # 2. upscale in a temp dir — output format follows the job policy
+    #    (JPEG by default: stock-ready and under Cloudinary's 10 Mo cap).
     with tempfile.TemporaryDirectory(prefix="upscale-") as tmp:
         in_ext = ".jpg" if content_type in ("image/jpeg", "image/jpg") else ".png"
         in_path = os.path.join(tmp, "input" + in_ext)
-        out_ext = output_ext_for_content_type(content_type)
+        out_ext = ".jpg" if config.output_format == "jpg" else ".png"
         out_path = os.path.join(tmp, "output" + out_ext)
         with open(in_path, "wb") as fh:
             fh.write(data)
 
-        width, height = upscaler.upscale(in_path, out_path, config.scale)
+        width, height = upscaler.upscale(
+            in_path, out_path, config.scale,
+            output_format=config.output_format,
+            jpeg_quality=config.jpeg_quality,
+            max_bytes=config.max_upload_bytes,
+        )
         size_bytes = os.path.getsize(out_path)
 
         # 3. upload to Cloudinary (folder + deterministic public_id)
         index = current + 1
         public_id = f"{image_id}_x{config.scale}_{index}"
-        uploaded = uploader.upload(out_path, public_id)
+        with Heartbeat(f"upload Cloudinary {public_id}"):
+            uploaded = uploader.upload(out_path, public_id)
 
     # 4. register on the image document
     updated = api.add_upscale(image_id, {

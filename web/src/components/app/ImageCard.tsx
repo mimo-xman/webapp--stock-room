@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ImageOff, Stamp, ZoomIn } from "lucide-react";
+import { Check, ImageOff, Stamp, ZoomIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StampToggle } from "./StampToggle";
 import type { StockImage } from "@/lib/types";
@@ -11,14 +11,20 @@ interface ImageCardProps {
   onOpen: (image: StockImage) => void;
   onToggleUsed: (image: StockImage) => void;
   thunkKey?: number;
+  /** CSV export selection for the ORIGINAL variant (undefined = feature off). */
+  selected?: boolean;
+  onToggleSelect?: (image: StockImage) => void;
 }
 
-export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0 }: ImageCardProps) {
+export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected = false, onToggleSelect }: ImageCardProps) {
   const [broken, setBroken] = useState(false);
 
   return (
     <article
-      className="group flex cursor-pointer flex-col border border-line-strong bg-surface transition-shadow hover:border-ink hover:shadow-[var(--shadow-hard)] focus-visible:outline-2 focus-visible:outline-brand"
+      className={cn(
+        "group flex cursor-pointer flex-col border border-line-strong bg-surface transition-shadow hover:border-ink hover:shadow-[var(--shadow-hard)] focus-visible:outline-2 focus-visible:outline-brand",
+        selected && "border-brand"
+      )}
       onClick={() => onOpen(image)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -58,6 +64,30 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0 }: ImageCa
         <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 max-md:opacity-100">
           <StampToggle used={image.used_in_adobe_stock} onToggle={() => onToggleUsed(image)} />
         </div>
+
+        {onToggleSelect && (
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={selected}
+            aria-label={`Select ${image.title} for the Adobe Stock CSV`}
+            title="Select for the Adobe Stock CSV"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelect(image);
+            }}
+            className={cn(
+              "absolute left-2 top-2 z-10 flex h-7 w-7 items-center justify-center border transition-colors focus-visible:outline-2 focus-visible:outline-brand",
+              selected
+                ? "border-brand bg-brand text-white"
+                : "border-line-strong bg-surface/90 text-transparent hover:border-ink",
+              !selected && "opacity-0 transition-opacity group-hover:opacity-100 max-md:opacity-100"
+            )}
+            data-testid="select-original"
+          >
+            <Check className="h-4 w-4" aria-hidden />
+          </button>
+        )}
       </div>
 
       <div className="flex flex-1 flex-col gap-2 p-3">

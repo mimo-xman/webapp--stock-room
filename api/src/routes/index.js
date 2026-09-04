@@ -51,6 +51,9 @@ router.delete('/api/sessions/:id', sessionController.remove);
 // images
 router.get('/api/images', imageController.list);
 router.post('/api/images', validate(imageCreateSchema), imageController.create);
+// NOTE: /api/images/all MUST stay ABOVE /api/images/:id — Express matches
+// routes in declaration order and 'all' would otherwise be treated as an id.
+router.get('/api/images/all', imageController.listAll);
 router.get('/api/images/:id', imageController.getOne);
 router.patch('/api/images/:id', validate(imageUpdateSchema), imageController.update);
 router.delete('/api/images/:id', imageController.remove);

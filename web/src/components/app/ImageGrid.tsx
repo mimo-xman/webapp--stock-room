@@ -9,9 +9,12 @@ interface ImageGridProps {
   onOpen: (image: StockImage) => void;
   onToggleUsed: (image: StockImage) => void;
   thunkKey?: number;
+  /** CSV selection resolver — when provided, each card gets its checkbox
+   *  (original variant). Undefined = feature not wired on that page. */
+  selectionFor?: (image: StockImage) => { selected: boolean; onToggle: (image: StockImage) => void } | undefined;
 }
 
-export function ImageGrid({ images, loading, onOpen, onToggleUsed, thunkKey = 0 }: ImageGridProps) {
+export function ImageGrid({ images, loading, onOpen, onToggleUsed, thunkKey = 0, selectionFor }: ImageGridProps) {
   if (loading) {
     return (
       <div
@@ -34,15 +37,20 @@ export function ImageGrid({ images, loading, onOpen, onToggleUsed, thunkKey = 0 
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" role="list">
-      {images.map((image) => (
-        <ImageCard
-          key={image._id}
-          image={image}
-          onOpen={onOpen}
-          onToggleUsed={onToggleUsed}
-          thunkKey={thunkKey}
-        />
-      ))}
+      {images.map((image) => {
+        const selection = selectionFor?.(image);
+        return (
+          <ImageCard
+            key={image._id}
+            image={image}
+            onOpen={onOpen}
+            onToggleUsed={onToggleUsed}
+            thunkKey={thunkKey}
+            selected={selection?.selected ?? false}
+            onToggleSelect={selection?.onToggle}
+          />
+        );
+      })}
     </div>
   );
 }

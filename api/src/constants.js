@@ -48,6 +48,10 @@ const IMAGE_SORT_FIELDS = [
 
 const MONGODB_OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 
+// GET /api/images/all — safety ceiling (the agent library stays far below;
+// beyond it the caller pages through GET /api/images).
+const IMAGES_ALL_MAX = 5000;
+
 // Who can append an upscale entry (enum on the subdocument `source` field).
 const UPSCALE_SOURCES = ['github-actions', 'manual'];
 
@@ -66,4 +70,5 @@ module.exports = {
   MONGODB_OBJECT_ID_RE,
   UPSCALE_SOURCES,
   UPSCALE_HARD_MAX,
+  IMAGES_ALL_MAX,
 };

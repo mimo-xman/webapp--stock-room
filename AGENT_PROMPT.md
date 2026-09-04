@@ -51,6 +51,28 @@ the same idea.
 
 ## STEP 2 — Prepare the batch (prompts + metadata)
 
+### 2.0 — Check the existing library (MANDATORY — avoid duplicates)
+
+Before writing ANY prompt, pull every image already in the database in one call:
+
+```
+GET [ADOBE STOCK IMAGES GENERATOR BY AGENTS API LINK]/api/images/all
+Headers: X-API-Key: [ADOBE STOCK IMAGES GENERATOR BY AGENTS API KEY]
+→ { "data": [ { "title", "category", "keywords", "prompt", "createdAt", … } ], "count": N }
+```
+
+- Compare every planned subject against the existing `title` / `keywords` / `prompt` values.
+- **Same subject AND same composition = a duplicate** — drop it, or change the concept
+  meaningfully (different subject, framing, setting, or category). Rewording the same idea
+  with different adjectives is NOT enough.
+- Goal: the database must never hold two near-identical images — generation quota is
+  precious, and Adobe Stock buyers reward variety, not repetition.
+- If the answer contains `"truncated": true`, also page through
+  `GET …/api/images?limit=100&page=N` until you have seen everything.
+- Use the same check at the END of the run (STEP 6): confirm you did not save two images
+  whose titles/prompts are near-identical; if you did, delete the weaker one
+  (`DELETE /api/images/:id`) and report it.
+
 For EACH subject, prepare one record using the **Lyra methodology** (4-D: Deconstruct →
 Diagnose → Develop → Deliver — full reference in the LYRA section at the bottom):
 
@@ -197,6 +219,7 @@ Auth: header `X-API-Key: [ADOBE STOCK IMAGES GENERATOR BY AGENTS API KEY]`.
 | `DELETE /api/sessions/:id` | Delete session **and all its images** |
 | `POST /api/images` | Register an image (full metadata) |
 | `GET /api/images` | List/filter images (`session_id`, `category`, `used_in_adobe_stock`, `quality`, `has_upscales`, `search`, `sort`, `order`, `page`, `limit` ∈ 5/10/20/50/100) |
+| `GET /api/images/all` | **Every image in one call** — run this BEFORE generating (STEP 2.0) to avoid duplicates; `?with_links=1` also returns `image_link` + `upscales` |
 | `GET /api/images/:id` | One image (incl. `upscales[]`) |
 | `PATCH /api/images/:id` | Edit fields (owner marks `used_in_adobe_stock`) |
 | `DELETE /api/images/:id` | Delete one image |
