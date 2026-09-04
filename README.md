@@ -44,7 +44,7 @@ Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de p
 | Chemin | Contenu | Hébergement |
 |---|---|---|
 | `api/` | API Node.js + Express + Mongoose (Sessions/Images, auth double, validation zod, rate limit, pagination/search/filter/sort backend, proxy download, cascade delete, **upscales** : endpoints + filtres + cap serveur, **`GET /api/images/all`** : toute la librairie en un appel pour l'anti-doublons de l'agent) | **Render** (runtime Node) |
-| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used · Adobe Stock », copy icons, modales custom, **affichage des upscales** : preview Original/×N, Mark used / Download / Delete, **export CSV Adobe Stock** : sélection multi-pages originaux + upscales → fichier `Filename,Title,Keywords,Category` téléchargeable) | **Netlify** |
+| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used · Adobe Stock », copy icons, modales custom, **affichage des upscales** : preview Original/×N, Mark used / Download / Delete, **export CSV Adobe Stock** : sélection multi-pages originaux + upscales → fichier `Filename,Title,Keywords,Category` téléchargeable, **statut batch** : badges upscaling/inactive, bannière d'erreur + Dismiss, bouton Active/Paused, **page « Agent prompt »** : formulaire des variables + validation → prompt généré copiable/téléchargeable en .md) | **Netlify** |
 | `AGENT_PROMPT.md` | **Le prompt réutilisable** à donner à l'agent (variables à remplacer + prompt Lyra inclus verbatim) | — |
 | `.github/workflows/` | **Jobs d'upscale Real-ESRGAN** : batch quotidien 08:00 Maroc + job manuel image unique (réveil auto de l'API Render, logs heartbeat, sortie JPEG prête Adobe Stock) | **GitHub Actions** |
 | `scripts/upscale/` | Scripts Python partagés des jobs (API client, Cloudinary, Real-ESRGAN) | — |
@@ -101,17 +101,28 @@ d'upload Adobe Stock** pour un lot sélectionné.
 
 Les images générées en 1K/2K sont agrandies (×2/×4) par **Real-ESRGAN** dans deux workflows :
 
-- **`Upscale — batch`** — tous les jours à **08:00 Maroc** : prend toutes les images dont le
-  nombre d'upscales est **<** `MAX_NUMBER_OF_UPSCALES_PER_IMAGE` (secret, **défaut 1**),
-  les plus anciennes d'abord, puis download → upscale → **upload Cloudinary** →
-  enregistrement sur l'image (`upscales[]` : url, datetime, scale, modèle, dimensions,
-  taille, run id). Exécution manuelle possible avec les mêmes inputs surchargeant les secrets.
+- **`Upscale — batch`** — tous les jours à **08:00 Maroc**, en **N jobs parallèles**
+  (matrix, défaut **10**, input `worker_count` — repo public = Actions illimitées) :
+  un job `warmup` réveille d'abord l'API Render, puis chaque worker boucle :
+  **réserver atomiquement** une image éligible (upscales <
+  `MAX_NUMBER_OF_UPSCALES_PER_IMAGE`, secret, **défaut 1** ; `POST /api/images/claim` —
+  deux workers ne peuvent jamais prendre la même image) → download → upscale
+  → **upload Cloudinary** → enregistrement (`upscales[]`) → `release`, et reprend
+  la suivante jusqu'à épuisement. Une image en échec dur (ex. lien source mort) est
+  mise en pause (`active:false` + `error_message`) et **réactivable d'un clic dans la
+  webapp** ; une réservation orpheline (worker tué) se libère toute seule après 30 min.
+  Les **tuiles Real-ESRGAN sont aussi parallélisées** (input `tile_workers`, défaut
+  auto = 1/cœur, max 4 — résultat **bit-à-bit identique** au traitement séquentiel,
+  vérifié par test de hash).
 - **`Upscale — single image`** — manuel : prend un `image_id` en input, vérifie qu'il existe
-  (message clair sinon), vérifie le nombre d'upscales < max (stop propre sinon), puis traite.
+  (message clair sinon), vérifie le nombre d'upscales < max (stop propre sinon), puis traite
+  (même sémantique release : succès efface l'erreur, échec met l'image en pause).
 
 Dans la webapp : section *Upscales* dans le détail d'une image — preview commutable
 Original/×N et actions **Mark used / Download / Delete** par variante, chip `×n` sur les
-cartes, filtre « With/Without upscales ».
+cartes, filtre « With/Without upscales ». **Statut des workers** : badges `upscaling` /
+`inactive` + chip `error` sur les cartes, bannière d'erreur avec **Dismiss**, bouton
+**Active/Paused** et filtre Status (Active / Paused (failed)) sur la page Images.
 
 Détails opérationnels : le job **réveille l'API Render** si elle est en pause (retry 5 min),
 imprime un **timer `⏱ hh:mm:ss` toutes les 5 s** pendant les phases silencieuses (chargement

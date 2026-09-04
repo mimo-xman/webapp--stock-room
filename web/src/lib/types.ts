@@ -45,6 +45,12 @@ export interface StockImage {
   category: string;
   keywords: string[];
   used_in_adobe_stock: boolean;
+  /** Batch-worker coordination (parallel upscale workflow). Absent on
+   *  images created before the feature — treat absent as active/not-in-use. */
+  active?: boolean;
+  in_use?: boolean;
+  in_use_at?: string;
+  error_message?: string;
   /** Upscaled variants (Real-ESRGAN via GitHub Actions) — absent on images
    *  created before the feature; always use `image.upscales ?? []`. */
   upscales?: Upscale[];

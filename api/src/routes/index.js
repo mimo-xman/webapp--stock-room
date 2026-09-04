@@ -7,7 +7,7 @@ const { dbState } = require('../db');
 const { requireAuth, badAuthGuard } = require('../middleware/auth');
 const { generalLimiter, authLimiter } = require('../middleware/rateLimit');
 const { validate } = require('../middleware/validate');
-const { verifySchema, sessionCreateSchema, imageCreateSchema, imageUpdateSchema, upscaleCreateSchema, upscaleUpdateSchema } = require('../schemas');
+const { verifySchema, sessionCreateSchema, imageCreateSchema, imageUpdateSchema, imageClaimSchema, imageReleaseSchema, upscaleCreateSchema, upscaleUpdateSchema } = require('../schemas');
 const authController = require('../controllers/authController');
 const sessionController = require('../controllers/sessionController');
 const imageController = require('../controllers/imageController');
@@ -51,11 +51,15 @@ router.delete('/api/sessions/:id', sessionController.remove);
 // images
 router.get('/api/images', imageController.list);
 router.post('/api/images', validate(imageCreateSchema), imageController.create);
-// NOTE: /api/images/all MUST stay ABOVE /api/images/:id — Express matches
-// routes in declaration order and 'all' would otherwise be treated as an id.
+// NOTE: /api/images/all and /api/images/claim MUST stay ABOVE
+// /api/images/:id — Express matches routes in declaration order and 'all' /
+// 'claim' would otherwise be treated as an id.
 router.get('/api/images/all', imageController.listAll);
+// Parallel batch workers: atomically reserve the oldest eligible image.
+router.post('/api/images/claim', validate(imageClaimSchema), imageController.claim);
 router.get('/api/images/:id', imageController.getOne);
 router.patch('/api/images/:id', validate(imageUpdateSchema), imageController.update);
+router.post('/api/images/:id/release', validate(imageReleaseSchema), imageController.release);
 router.delete('/api/images/:id', imageController.remove);
 router.get('/api/images/:id/download', imageController.download);
 

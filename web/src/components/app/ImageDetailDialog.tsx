@@ -17,9 +17,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Check, FileDown, Pencil, Trash2, Download, ImageOff, ArrowRight, ZoomIn, ExternalLink } from "lucide-react";
+import { Check, FileDown, Pencil, Trash2, Download, ImageOff, ArrowRight, ZoomIn, ExternalLink, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { CopyButton } from "./CopyButton";
 import { StampToggle } from "./StampToggle";
+import { StatusToggle } from "./StatusToggle";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { api } from "@/lib/api";
 import { formatBytes, formatDateTime } from "@/lib/format";
@@ -64,6 +65,8 @@ export function ImageDetailDialog({
   const [confirmUpscaleDelete, setConfirmUpscaleDelete] = useState<Upscale | null>(null);
   const [busyUpscaleId, setBusyUpscaleId] = useState<string | null>(null);
   const [prevId, setPrevId] = useState<string>("");
+  const [busyStatus, setBusyStatus] = useState(false);
+  const [busyDismiss, setBusyDismiss] = useState(false);
   const { toast } = useToast();
 
   // Reset the transient states when the dialog switches to another image
@@ -84,6 +87,43 @@ export function ImageDetailDialog({
   const stampVisible = activeUpscale
     ? Boolean(activeUpscale.used_in_adobe_stock)
     : image.used_in_adobe_stock;
+
+  async function toggleActive() {
+    if (!image) return;
+    // New state: reactivate when paused (absent field = active).
+    const next = image.active === false;
+    setBusyStatus(true);
+    try {
+      const res = await api.images.update(image._id, { active: next });
+      onImageUpdate(res.data);
+      toast({
+        title: next ? "Image reactivated" : "Image paused",
+        description: next
+          ? "Eligible again for the next upscale batch run."
+          : "Excluded from every upscale batch run until reactivated.",
+      });
+    } catch (e: unknown) {
+      const msg = (e as { payload?: { message?: string } })?.payload?.message || "The status was not applied.";
+      toast({ variant: "destructive", title: "Update failed", description: msg });
+    } finally {
+      setBusyStatus(false);
+    }
+  }
+
+  async function dismissError() {
+    if (!image) return;
+    setBusyDismiss(true);
+    try {
+      const res = await api.images.update(image._id, { error_message: "" });
+      onImageUpdate(res.data);
+      toast({ title: "Error dismissed", description: "The failure message was cleared." });
+    } catch (e: unknown) {
+      const msg = (e as { payload?: { message?: string } })?.payload?.message || "The message was not cleared.";
+      toast({ variant: "destructive", title: "Update failed", description: msg });
+    } finally {
+      setBusyDismiss(false);
+    }
+  }
 
   async function download() {
     setDownloading(true);
@@ -253,6 +293,52 @@ export function ImageDetailDialog({
             </DialogHeader>
 
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+              {/* ── batch-worker error banner (failure message + dismiss) ── */}
+              {image.error_message && (
+                <section
+                  className="border border-danger bg-danger-soft p-3"
+                  data-testid="error-banner"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="eyebrow flex items-center gap-1.5 text-danger">
+                      <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+                      Last upscale error
+                    </h4>
+                    <CopyButton value={image.error_message} label="error message" />
+                  </div>
+                  <p className="mt-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap border border-danger/30 bg-surface p-2.5 font-mono text-[11.5px] leading-relaxed text-danger">
+                    {image.error_message}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={dismissError}
+                      disabled={busyDismiss}
+                      className="flex h-[30px] items-center gap-1.5 border-2 border-danger/50 bg-surface px-3 font-display text-[11px] font-bold uppercase tracking-widest text-danger transition-colors hover:border-danger hover:bg-danger hover:text-white disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-brand"
+                      data-testid="dismiss-error"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                      {busyDismiss ? "Dismissing…" : "Dismiss"}
+                    </button>
+                    {image.active === false && (
+                      <span className="font-mono text-[10.5px] uppercase tracking-wider text-danger">
+                        image paused — reactivate below once fixed
+                      </span>
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {image.in_use === true && (
+                <p className="flex items-center gap-2 border border-brand/40 bg-paper p-2.5 font-mono text-[11px] text-brand" data-testid="in-use-banner">
+                  <span
+                    className="h-2 w-2 animate-pulse rounded-full bg-brand"
+                    aria-hidden
+                  />
+                  Claimed by an upscale worker right now — the result will appear in Upscales when done.
+                </p>
+              )}
+
               <section>
                 <div className="flex items-center justify-between gap-2">
                   <h4 className="eyebrow">Keywords ({image.keywords.length})</h4>
@@ -431,6 +517,12 @@ export function ImageDetailDialog({
                 </button>
               )}
               <StampToggle used={image.used_in_adobe_stock} onToggle={() => onToggleUsed(image)} />
+              <StatusToggle
+                active={image.active !== false}
+                disabled={busyStatus}
+                onToggle={toggleActive}
+                label={image.active !== false ? "Pause this image (exclude from batch runs)" : "Reactivate this image"}
+              />
               <button
                 type="button"
                 onClick={download}

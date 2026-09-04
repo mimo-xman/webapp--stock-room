@@ -3,6 +3,10 @@
 > **How the owner uses this file** — copy everything below the ✂ CUT line, replace every
 > `[BRACKETED VARIABLE]`, and send it as a single message to your AI agent.
 > Do not modify the LYRA section at the bottom — it must stay verbatim.
+>
+> **Shortcut**: the webapp has an **Agent prompt** page (top navigation) that renders this
+> file with the variables filled in, validates them, and lets you copy or download the
+> ready-to-send prompt — no manual editing needed.
 
 ## Variables to replace before sending
 

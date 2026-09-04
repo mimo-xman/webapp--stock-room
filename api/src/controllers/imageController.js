@@ -5,7 +5,7 @@ const { Readable } = require('node:stream');
 const Image = require('../models/Image');
 const Session = require('../models/Session');
 const { CONFIG } = require('../config');
-const { IMAGE_SORT_FIELDS, ADOBE_CATEGORIES, MONGODB_OBJECT_ID_RE, UPSCALE_HARD_MAX, IMAGES_ALL_MAX } = require('../constants');
+const { IMAGE_SORT_FIELDS, ADOBE_CATEGORIES, MONGODB_OBJECT_ID_RE, UPSCALE_HARD_MAX, IMAGES_ALL_MAX, CLAIM_STALE_DEFAULT_MINUTES } = require('../constants');
 const {
   escapeRegex,
   parseCommonQuery,
@@ -63,6 +63,24 @@ function parseImageFilters(query) {
   const f4 = exactFilter(query.quality, 'quality', ['1K', '2K', '4K']);
   if (f4.problem) problems.push(f4.problem);
   else if (f4.value !== undefined) filters.quality = f4.value;
+
+  // ── batch-worker status filters ──
+  // active=true  → "not paused"  : matches true AND absent (pre-feature docs)
+  // active=false → "paused"      : exactly false (set after a hard failure)
+  if (query.active !== undefined && query.active !== '') {
+    const v = String(query.active).toLowerCase();
+    if (v === 'true') filters.active = { $ne: false };
+    else if (v === 'false') filters.active = false;
+    else problems.push({ path: 'active', message: 'active must be "true" or "false"' });
+  }
+  // in_use=true  → currently claimed by a batch worker (exactly true)
+  // in_use=false → free (matches false AND absent)
+  if (query.in_use !== undefined && query.in_use !== '') {
+    const v = String(query.in_use).toLowerCase();
+    if (v === 'true') filters.in_use = true;
+    else if (v === 'false') filters.in_use = { $ne: true };
+    else problems.push({ path: 'in_use', message: 'in_use must be "true" or "false"' });
+  }
 
   const f5 = exactFilter(query.ratio, 'ratio', null);
   if (f5.value !== undefined) filters.ratio = f5.value;
@@ -256,6 +274,96 @@ async function remove(req, res, next) {
       throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
     }
     res.json({ data: { deleted: true } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── parallel batch workers: claim / release ─────────────────────────────
+
+/**
+ * POST /api/images/claim
+ *
+ * A parallel batch worker atomically reserves ONE eligible image:
+ * upscales count BELOW max_upscales, active, and not in use (or claimed
+ * longer than `stale_minutes` ago — a worker that died without releasing).
+ * The reservation (in_use: true + in_use_at: now) is written by the SAME
+ * findOneAndUpdate that selects the document, so two concurrent workers can
+ * never reserve the same image. Oldest images first.
+ *
+ * Body: { max_upscales?, stale_minutes? } — both optional.
+ * Response: 200 { data: <image | null>, claimed: boolean, max_upscales: n }
+ * (data: null means "nothing to claim" — the worker exits its loop).
+ */
+async function claim(req, res, next) {
+  try {
+    const { max_upscales, stale_minutes } = req.validated;
+    const effectiveMax = Math.min(
+      max_upscales ?? CONFIG.MAX_UPSCALES_PER_IMAGE,
+      UPSCALE_HARD_MAX
+    );
+    const staleMinutes = stale_minutes ?? CLAIM_STALE_DEFAULT_MINUTES;
+    const staleBefore = new Date(Date.now() - staleMinutes * 60_000);
+
+    const filter = {
+      // Absent field (= images created before this feature) counts as active.
+      active: { $ne: false },
+      $or: [
+        { in_use: { $ne: true } },
+        { in_use_at: { $lt: staleBefore } },
+      ],
+      $expr: { $lt: [{ $size: { $ifNull: ['$upscales', []] } }, effectiveMax] },
+    };
+
+    const doc = await Image.findOneAndUpdate(
+      filter,
+      { $set: { in_use: true, in_use_at: new Date() } },
+      { sort: { createdAt: 1, _id: 1 }, new: true }
+    ).lean();
+
+    if (!doc) {
+      return res.json({ data: null, claimed: false, max_upscales: effectiveMax });
+    }
+    res.json({
+      data: { ...doc, _id: String(doc._id), session_id: String(doc.session_id) },
+      claimed: true,
+      max_upscales: effectiveMax,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/images/:id/release
+ *
+ * The worker that claimed an image reports the terminal state of its attempt.
+ * Body: { status: 'ok' | 'stopped' | 'error', error_message? }
+ *   ok      → in_use: false, in_use_at: null, error_message: ''
+ *   stopped → in_use: false, in_use_at: null (run cancelled / limit raced)
+ *   error   → in_use: false, in_use_at: null, active: false, error_message: …
+ * Always idempotent — releasing an unclaimed image is a harmless no-op,
+ * which lets single.py mark failures without claiming first.
+ */
+async function release(req, res, next) {
+  try {
+    const { status, error_message } = req.validated;
+
+    const patch = { in_use: false, in_use_at: null };
+    if (status === 'ok') patch.error_message = '';
+    if (status === 'error') {
+      patch.active = false;
+      patch.error_message = error_message || 'Unknown upscale failure';
+    }
+
+    const image = await Image.findByIdAndUpdate(req.params.id, patch, {
+      new: true,
+      runValidators: true,
+    });
+    if (!image) {
+      throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
+    }
+    res.json({ data: toPlain(image) });
   } catch (err) {
     next(err);
   }
@@ -534,6 +642,8 @@ module.exports = {
   list,
   listAll,
   create,
+  claim,
+  release,
   getOne,
   update,
   remove,

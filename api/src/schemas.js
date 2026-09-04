@@ -76,10 +76,55 @@ const imageUpdateSchema = z
     category: z.enum(ADOBE_CATEGORIES),
     keywords,
     used_in_adobe_stock: z.boolean(),
+    // Batch-worker coordination (webapp "Active/Paused" toggle + error dismissal).
+    active: z.boolean(),
+    error_message: z.string().trim().max(2000, 'error_message must be at most 2000 characters'),
   })
   .partial()
   .refine((obj) => Object.keys(obj).length > 0, {
     message: 'provide at least one field to update',
+  });
+
+// ── parallel batch workers (claim / release) ──
+// POST /api/images/claim — a batch worker atomically reserves the oldest
+// eligible image (upscales < max_upscales, active, not already claimed —
+// or claimed long enough ago to be considered stale). Returns {data: null}
+// when nothing is claimable.
+const imageClaimSchema = z.object({
+  max_upscales: z
+    .number({ invalid_type_error: 'max_upscales must be a number' })
+    .int('max_upscales must be an integer')
+    .min(1, 'max_upscales must be at least 1')
+    .max(10, 'max_upscales must be at most 10')
+    .optional(),
+  stale_minutes: z
+    .number({ invalid_type_error: 'stale_minutes must be a number' })
+    .int('stale_minutes must be an integer')
+    .min(1, 'stale_minutes must be at least 1')
+    .max(1440, 'stale_minutes must be at most 1440 (24h)')
+    .optional(),
+});
+
+// POST /api/images/:id/release — the worker that claimed an image reports
+// the terminal state of its attempt:
+//   ok      → in_use cleared, error_message cleared (success)
+//   stopped → in_use cleared only (cancelled / limit raced / skipped-neutral)
+//   error   → in_use cleared + active set to false + error_message recorded
+const imageReleaseSchema = z
+  .object({
+    status: z.enum(['ok', 'stopped', 'error'], {
+      errorMap: () => ({ message: 'status must be one of: ok, stopped, error' }),
+    }),
+    error_message: z
+      .string()
+      .trim()
+      .min(1, 'error_message is required when status is "error"')
+      .max(2000, 'error_message must be at most 2000 characters')
+      .optional(),
+  })
+  .refine((s) => s.status !== 'error' || Boolean(s.error_message), {
+    message: 'error_message is required when status is "error"',
+    path: ['error_message'],
   });
 
 // ── upscales ──
@@ -123,6 +168,8 @@ module.exports = {
   sessionCreateSchema,
   imageCreateSchema,
   imageUpdateSchema,
+  imageClaimSchema,
+  imageReleaseSchema,
   upscaleCreateSchema,
   upscaleUpdateSchema,
 };

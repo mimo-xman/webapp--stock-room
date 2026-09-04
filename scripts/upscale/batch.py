@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
 """
-Batch upscale — Real-ESRGAN via GitHub Actions.
+Batch upscale — Real-ESRGAN via GitHub Actions, PARALLEL worker edition.
 
-Processes every image whose upscale count is BELOW max_upscales_per_image
-(repo secret MAX_NUMBER_OF_UPSCALES_PER_IMAGE, default 1 — overridable
-by workflow input or CLI flag), oldest first, capped at --max-images.
+The workflow runs N copies of this script at the same time (matrix jobs).
+Each copy loops:
 
-Each successful image:
-  download (API proxy) → Real-ESRGAN → upload to Cloudinary →
-  POST /api/images/:id/upscales (registered on the image document).
+    claim one eligible image (atomic POST /api/images/claim —
+    upscales < max_upscales AND active AND not already claimed)
+        → upscale → upload Cloudinary → POST /api/images/:id/upscales
+        → release 'ok'
+    claim the next one… until the API answers "nothing to claim".
+
+The claim is atomic (findOneAndUpdate), so N workers never process the same
+image twice. Every attempt ALWAYS ends with a release:
+
+    ok      → in_use cleared, error cleared
+    stopped → in_use cleared (cancelled / limit raced / image vanished)
+    error   → in_use cleared + image marked active:false + error_message
+              recorded — visible in the webapp, which can re-activate it
+
+A claim older than --stale-minutes (default 30) is considered dead (a worker
+killed without cleanup) and is reclaimable — no image can stay locked forever.
 
 Exit codes:
   0 — done (or nothing eligible, or dry-run listing)
@@ -23,6 +35,7 @@ Run locally (see docs/UPSCALE.md):
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 
 from upscale_lib import (
@@ -30,6 +43,7 @@ from upscale_lib import (
     CloudinaryUploader,
     ImageSkipped,
     JobError,
+    LimitReached,
     RealEsrganUpscaler,
     build_config,
     handle_fatal,
@@ -42,7 +56,10 @@ from upscale_lib import (
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         prog="batch.py",
-        description="Upscale all eligible images (upscale count < max_upscales_per_image), oldest first.",
+        description=(
+            "Upscale eligible images in a claim loop (several copies of this "
+            "script can run concurrently — each claims a different image)."
+        ),
     )
     parser.add_argument("--api-url", default="", help="Asset API base URL (défaut : secret ASSET_API_URL)")
     parser.add_argument("--api-key", default="", help="Clé de l'agent (défaut : secret ASSET_API_KEY)")
@@ -66,7 +83,19 @@ def parse_args(argv):
         "--max-images",
         type=int,
         default=None,
-        help="Nombre max d'images traitées dans cette exécution (défaut : 5, quota Actions oblige)",
+        help="Nombre max d'images traitées par CE worker (défaut : 5 ; total = max_images × nb workers)",
+    )
+    parser.add_argument(
+        "--tile-workers",
+        default="",
+        dest="tile_workers",
+        help="Processus parallèles pour les tuiles Real-ESRGAN (défaut : auto = min(4, cœurs CPU))",
+    )
+    parser.add_argument(
+        "--stale-minutes",
+        default="",
+        dest="stale_minutes",
+        help="Une réservation plus vieille que X minutes est considérée morte et reprisable (défaut : 30)",
     )
     parser.add_argument("--cloudinary-folder", default="", help="Dossier Cloudinary (défaut : adobe-stock/upscales)")
     parser.add_argument("--model-dir", default="", help="Dossier de cache des modèles (défaut : ~/.cache/upscale-models)")
@@ -79,6 +108,46 @@ def parse_args(argv):
     parser.add_argument("--jpeg-quality", default="", help="Qualité JPEG 80-100 (défaut : 95, réduite auto si > limite Cloudinary)")
     parser.add_argument("--dry-run", action="store_true", help="Lister les images éligibles sans rien faire")
     return parser.parse_args(argv)
+
+
+class ClaimGuard:
+    """Tracks the image currently claimed by THIS worker and guarantees a
+    release on every exit path — normal, exception, or SIGINT/SIGTERM
+    (GitHub "Cancel workflow"). A release failure is only warned about:
+    the stale window (30 min) recovers the lock anyway."""
+
+    def __init__(self, api: AssetApi, stale_minutes: int):
+        self.api = api
+        self.stale_minutes = stale_minutes
+        self.image_id: str | None = None
+        self.title: str = ""
+        # Cancellation → release as 'stopped' before dying.
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                signal.signal(sig, self._on_signal)
+            except (ValueError, OSError):
+                pass  # not the main thread / unsupported platform
+
+    def _on_signal(self, signum, frame):
+        self.release("stopped")
+        log(f"🛑 signal {signum} — réservation libérée, arrêt du worker.")
+        sys.exit(128 + signum)
+
+    def hold(self, image_doc: dict) -> None:
+        self.image_id = str(image_doc["_id"])
+        self.title = image_doc.get("title", "")
+
+    def release(self, status: str, error_message: str = "") -> None:
+        if not self.image_id:
+            return
+        image_id, self.image_id, self.title = self.image_id, None, ""
+        try:
+            self.api.release(image_id, status, error_message)
+        except Exception as e:  # noqa: BLE001 — release must never crash the loop
+            log(
+                f"⚠ release {image_id} ({status}) a échoué — {e}. La fenêtre "
+                f"stale ({self.stale_minutes} min) libérera la réservation."
+            )
 
 
 def main(argv=None) -> int:
@@ -97,89 +166,130 @@ def main(argv=None) -> int:
     except JobError as e:
         return handle_fatal(e, "réveil de l'API")
 
-    # ── eligibility listing (fail fast, before any heavy import) ──
-    try:
-        images = api.list_eligible(config.max_upscales, config.max_images)
-    except JobError as e:
-        return handle_fatal(e, "récupération des images éligibles")
-
-    log(
-        f"Politique : max {config.max_upscales} upscale(s)/image · échelle ×{config.scale} · "
-        f"modèle {config.model} · {config.max_images} image(s) max"
-    )
-
-    if not images:
-        log(
-            f"✓ Aucune image éligible — toutes les images ont déjà atteint "
-            f"{config.max_upscales} upscale(s), ou la base est vide."
-        )
-        write_summary(
-            "Upscale batch — rien à faire",
-            f"Aucune image avec moins de {config.max_upscales} upscale(s).",
-            [],
-        )
-        return 0
-
+    # ── dry-run: list eligible images WITHOUT claiming anything ──
     if config.dry_run:
-        results = [
-            {"status": "skipped", "image_id": str(i["_id"]), "title": i.get("title", ""),
-             "detail": f"éligible ({len(i.get('upscales') or [])}/{config.max_upscales} upscales) — dry-run"}
-            for i in images
-        ]
-        log(f"[dry-run] {len(images)} image(s) éligible(s) :")
+        try:
+            images = api.list_eligible(config.max_upscales, config.max_images)
+        except JobError as e:
+            return handle_fatal(e, "récupération des images éligibles")
+        log(
+            f"[dry-run] {len(images)} image(s) éligible(s) "
+            f"(active, non réservée, < {config.max_upscales} upscale(s)) :"
+        )
         for i in images:
             log(f"  · {i.get('title')} [{i['_id']}] — {len(i.get('upscales') or [])}/{config.max_upscales} upscales")
         write_summary(
             "Upscale batch — dry-run",
             f"{len(images)} image(s) éligible(s) (aucun traitement effectué).",
-            results,
+            [
+                {"status": "skipped", "image_id": str(i["_id"]), "title": i.get("title", ""),
+                 "detail": f"éligible ({len(i.get('upscales') or [])}/{config.max_upscales} upscales) — dry-run"}
+                for i in images
+            ],
         )
         return 0
 
-    # ── heavy setup: model + Cloudinary (after eligibility is confirmed) ──
+    log(
+        f"Politique : max {config.max_upscales} upscale(s)/image · échelle ×{config.scale} · "
+        f"modèle {config.model} · {config.max_images} image(s) max par worker · "
+        f"{config.tile_workers} worker(s) de tuiles"
+    )
+
+    # ── heavy setup: model + Cloudinary pool (before the first claim, so
+    #    reservations stay short) ──
     try:
-        upscaler = RealEsrganUpscaler(config.model, config.model_dir)
+        upscaler = RealEsrganUpscaler(config.model, config.model_dir, tile_workers=config.tile_workers)
         upscaler._load()  # fail here, before touching any image
         uploader = CloudinaryUploader(config)
     except JobError as e:
         return handle_fatal(e, "initialisation Real-ESRGAN / Cloudinary")
 
-    # ── process each image; one failure never stops the run ──
+    guard = ClaimGuard(api, config.stale_minutes)
     results = []
-    for image_doc in images:
+    processed = 0
+
+    # ── claim loop: keep going until the API says "nothing to claim" ──
+    while processed < config.max_images:
+        try:
+            image_doc = api.claim(config.max_upscales, config.stale_minutes)
+        except JobError as e:
+            return handle_fatal(e, "réservation d'image (claim)")
+
+        if image_doc is None:
+            if processed == 0 and not results:
+                log(
+                    "✓ Aucune image éligible — toutes ont atteint leur quota "
+                    "d'upscales, sont en pause (active:false) ou sont réservées."
+                )
+            else:
+                log("✓ Plus rien à réclamer — tous les autres workers ont le reste.")
+            break
+
+        image_id = str(image_doc["_id"])
+        title = image_doc.get("title", "(sans titre)")
+        guard.hold(image_doc)
+        log(f"→ réclamée : {title} [{image_id}] ({len(image_doc.get('upscales') or [])}/{config.max_upscales})")
+
         try:
             record = process_image(config, api, upscaler, uploader, image_doc)
             results.append(record)
+            processed += 1
+            guard.release("ok")
             log(f"✅ {record['title']} → ×{record['scale']} {record['dimensions']} ({record['url']})")
-        except ImageSkipped as e:
+        except LimitReached as e:
+            # Another worker registered an upscale between our claim and our
+            # registration — the image is simply done. Not a failure.
             results.append({
                 "status": "skipped",
-                "image_id": str(image_doc["_id"]),
-                "title": image_doc.get("title", ""),
+                "image_id": image_id,
+                "title": title,
                 "detail": str(e),
             })
-            log(f"⏭️  {image_doc.get('title')} — ignorée : {e}")
+            guard.release("stopped")
+            log(f"⏭️  {title} — ignorée : {e}")
+        except ImageSkipped as e:
+            # Dead source link, empty file, image deleted meanwhile… these do
+            # not heal by retrying: mark the image inactive with the reason,
+            # so the owner sees it in the webapp and re-activates it if fixed.
+            results.append({
+                "status": "skipped",
+                "image_id": image_id,
+                "title": title,
+                "detail": str(e),
+            })
+            guard.release("error", error_message=f"ignorée : {e}")
+            log(f"⏭️  {title} — ignorée et mise en pause : {e}")
         except JobError as e:
             results.append({
                 "status": "failed",
-                "image_id": str(image_doc["_id"]),
-                "title": image_doc.get("title", ""),
+                "image_id": image_id,
+                "title": title,
                 "detail": str(e),
             })
-            log(f"❌ {image_doc.get('title')} — échec : {e}")
+            guard.release("error", error_message=str(e))
+            log(f"❌ {title} — échec (image mise en pause) : {e}")
+        except KeyboardInterrupt:
+            guard.release("stopped")
+            upscaler.close()
+            raise
+
+    guard.release("stopped")  # no-op when nothing is held
+    upscaler.close()
 
     failed = sum(1 for r in results if r["status"] == "failed")
     ok = sum(1 for r in results if r["status"] == "ok")
     write_summary(
-        "Upscale batch",
-        f"Échelle ×{config.scale} · modèle {config.model} · max {config.max_upscales} upscale(s)/image.",
+        "Upscale batch (worker parallèle)",
+        f"Échelle ×{config.scale} · modèle {config.model} · max {config.max_upscales} upscale(s)/image · "
+        f"{config.tile_workers} worker(s) de tuiles.",
         results,
     )
 
     if failed:
         print(
-            f"\n✖ {failed} image(s) en échec sur {len(results)} — relancez le workflow "
-            "(les images déjà traitées sont ignorées automatiquement).",
+            f"\n✖ {failed} image(s) en échec sur {len(results)} — elles sont "
+            "passées en active:false avec leur error_message (visibles dans la "
+            "webapp). Réactivez-les après correction, puis relancez le workflow.",
             file=sys.stderr,
             flush=True,
         )

@@ -23,8 +23,10 @@ const endpointRows = [
   ['GET', '/api/images', 'List images — pagination, search, filters, sort', true],
   ['GET', '/api/images/all', 'Every image in one call — agent dedup check before generating (lean fields; ?with_links=1 adds links + upscales)', true],
   ['POST', '/api/images', 'Register a generated image (full metadata)', true],
+  ['POST', '/api/images/claim', 'PARALLEL BATCH WORKER — atomically reserve the oldest eligible image (upscales < max, active, free). Body { max_upscales?, stale_minutes? } → { data: image|null, claimed }', true],
+  ['POST', '/api/images/:id/release', 'Batch worker reports the attempt outcome — { status: ok|stopped|error, error_message? }. error → image paused (active:false) + error_message recorded', true],
   ['GET', '/api/images/:id', 'One image (incl. its upscales)', true],
-  ['PATCH', '/api/images/:id', 'Edit image metadata (incl. used_in_adobe_stock)', true],
+  ['PATCH', '/api/images/:id', 'Edit image metadata (incl. used_in_adobe_stock, active, error_message)', true],
   ['DELETE', '/api/images/:id', 'Delete an image', true],
   ['GET', '/api/images/:id/download', 'Download the image file (server-side proxy)', true],
   ['POST', '/api/images/:id/upscales', 'Register an upscaled variant (Real-ESRGAN job) — 409 UPSCALE_LIMIT_REACHED when the image already holds max_upscales entries', true],
@@ -128,6 +130,8 @@ order     asc | desc               (default desc)
 from / to ISO dates on createdAt</pre>
     <p>Images also accept exact filters: <code>session_id</code>, <code>category</code>,
     <code>used_in_adobe_stock=true|false</code>, <code>quality</code>, <code>ratio</code>,
+    <code>active=true|false</code> (webapp Status filter — paused/failed images),
+    <code>in_use=true|false</code> (claimed by a batch worker),
     plus upscale filters: <code>has_upscales=true|false</code> (webapp) or
     <code>upscales_lt=N</code> — images with fewer than N upscales (daily batch job).
     Response envelope:</p>

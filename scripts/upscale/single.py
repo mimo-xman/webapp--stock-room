@@ -62,6 +62,12 @@ def parse_args(argv):
         default="",
         help="RealESRGAN_x4plus | RealESRGAN_x2plus | realesr-general-x4v3 (défaut : RealESRGAN_x4plus)",
     )
+    parser.add_argument(
+        "--tile-workers",
+        default="",
+        dest="tile_workers",
+        help="Processus parallèles pour les tuiles Real-ESRGAN (défaut : auto = min(4, cœurs CPU))",
+    )
     parser.add_argument("--cloudinary-folder", default="", help="Dossier Cloudinary (défaut : adobe-stock/upscales)")
     parser.add_argument("--model-dir", default="", help="Dossier de cache des modèles (défaut : ~/.cache/upscale-models)")
     parser.add_argument(
@@ -145,14 +151,23 @@ def main(argv=None) -> int:
         return 0
 
     # ── step 3 : process (download → upscale → upload → register) ──
+    # The script does not CLAIM the image (it targets one specific id), but it
+    # uses the same release semantics so the outcome is visible in the webapp:
+    #   success → release 'ok'    (clears any past error_message)
+    #   failure → release 'error' (marks active:false + error_message)
+    #   limit   → release 'stopped'
+    # release() is best-effort — a failure to release never masks the real error.
+    upscaler = None
     try:
-        upscaler = RealEsrganUpscaler(config.model, config.model_dir)
+        upscaler = RealEsrganUpscaler(config.model, config.model_dir, tile_workers=config.tile_workers)
         upscaler._load()
         uploader = CloudinaryUploader(config)
         record = process_image(config, api, upscaler, uploader, image)
     except LimitReached as e:  # raced with another run / stale count
         message = f"Limite atteinte au moment d'enregistrer — {e}"
         log(f"\n🛑 STOP — {message}")
+        _best_effort_release(api, image_id, "stopped")
+        _close_upscaler(upscaler)
         write_summary(
             "Upscale image unique — stop",
             message,
@@ -160,6 +175,8 @@ def main(argv=None) -> int:
         )
         return 0
     except ImageSkipped as e:
+        _best_effort_release(api, image_id, "error", error_message=f"ignorée : {e}")
+        _close_upscaler(upscaler)
         print(f"\n✖ IMPOSSIBLE DE TRAITER L'IMAGE\n  {e}\n", file=sys.stderr, flush=True)
         write_summary(
             "Upscale image unique — ignorée",
@@ -168,7 +185,12 @@ def main(argv=None) -> int:
         )
         return 1
     except JobError as e:
+        _best_effort_release(api, image_id, "error", error_message=str(e))
+        _close_upscaler(upscaler)
         return handle_fatal(e, f"traitement de l'image {image_id}")
+    else:
+        _best_effort_release(api, image_id, "ok")
+        _close_upscaler(upscaler)
 
     write_summary(
         "Upscale image unique",
@@ -178,6 +200,23 @@ def main(argv=None) -> int:
     log(f"\n✓ Image upscalée : {record['title']} → ×{record['scale']} {record['dimensions']}")
     log(f"  {record['url']}")
     return 0
+
+
+def _best_effort_release(api: AssetApi, image_id: str, status: str, error_message: str = ""):
+    """release() without ever raising — a release failure must not mask the
+    real outcome (the stale window recovers the lock anyway when relevant)."""
+    try:
+        api.release(image_id, status, error_message)
+    except Exception as e:  # noqa: BLE001
+        log(f"⚠ release {image_id} ({status}) a échoué — {e}")
+
+
+def _close_upscaler(upscaler):
+    if upscaler is not None:
+        try:
+            upscaler.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

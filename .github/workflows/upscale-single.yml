@@ -43,6 +43,10 @@ on:
         description: "Qualité JPEG 80-100 (réduite automatiquement si le fichier dépasse la limite Cloudinary)"
         required: false
         default: "95"
+      tile_workers:
+        description: "Processus par tuile Real-ESRGAN (vide = auto : un par cœur CPU, max 4 — résultat identique au séquentiel)"
+        required: false
+        default: ""
       dry_run:
         description: "Vérifier l'image et la limite sans rien upscaler"
         type: boolean
@@ -117,6 +121,7 @@ jobs:
           UPSCALE_MODEL: ${{ inputs.model || 'RealESRGAN_x4plus' }}
           UPSCALE_OUTPUT_FORMAT: ${{ inputs.output_format || 'jpg' }}
           UPSCALE_JPEG_QUALITY: ${{ inputs.jpeg_quality || '95' }}
+          UPSCALE_TILE_WORKERS: ${{ inputs.tile_workers || 'auto' }}
           CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
           CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
           CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}

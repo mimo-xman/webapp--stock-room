@@ -59,6 +59,10 @@ const UPSCALE_SOURCES = ['github-actions', 'manual'];
 // caller's own policy — see POST /api/images/:id/upscales and docs/UPSCALE.md).
 const UPSCALE_HARD_MAX = 10;
 
+// POST /api/images/claim — a claim older than this (minutes) is considered
+// stale (worker died without releasing) and can be reclaimed by another worker.
+const CLAIM_STALE_DEFAULT_MINUTES = 30;
+
 module.exports = {
   ADOBE_CATEGORIES,
   QUALITIES,
@@ -70,5 +74,6 @@ module.exports = {
   MONGODB_OBJECT_ID_RE,
   UPSCALE_SOURCES,
   UPSCALE_HARD_MAX,
+  CLAIM_STALE_DEFAULT_MINUTES,
   IMAGES_ALL_MAX,
 };

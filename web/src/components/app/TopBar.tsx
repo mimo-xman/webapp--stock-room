@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Lock, Boxes, Images } from "lucide-react";
+import { Lock, Boxes, Images, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { clearAppPassword } from "@/lib/auth";
 import { toast } from "@/hooks/use-toast";
@@ -14,6 +14,7 @@ export function TopBar() {
   const links = [
     { href: "/sessions", label: "Sessions", icon: Boxes },
     { href: "/images", label: "Images", icon: Images },
+    { href: "/prompt", label: "Agent prompt", icon: Wand2 },
   ];
 
   function lock() {

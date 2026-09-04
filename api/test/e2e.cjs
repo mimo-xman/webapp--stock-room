@@ -495,6 +495,131 @@ async function main() {
     r = await call('GET', `/api/images/${img1}`, { key: API_KEY });
     ok('image gone → 404', r.status === 404);
 
+    // ── parallel batch workers: claim / release ─────────────────────────────
+    console.log('─ claim / release (parallel batch workers)');
+    const Image = require('../src/models/Image'); // same mongoose connection as the server
+
+    r = await call('POST', '/api/sessions', { key: API_KEY, body: { title: 'Claim probe session' } });
+    const s3 = r.json.data._id;
+
+    r = await call('POST', '/api/images', {
+      key: API_KEY,
+      body: mkImage(50, s3, { title: 'Claim probe A' }),
+    });
+    const cA = r.json.data._id;
+    ok('create → active:true, in_use:false, error_message:""',
+      r.status === 201 && r.json.data.active === true && r.json.data.in_use === false && r.json.data.error_message === '', r.json.data);
+
+    r = await call('POST', '/api/images/claim', { key: API_KEY, body: { max_upscales: 'banana' } });
+    ok('claim with string max_upscales → 400', r.status === 400 && r.json.error.code === 'VALIDATION_ERROR');
+
+    r = await call('POST', '/api/images/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    ok('claim → oldest eligible first + claimed:true + in_use:true + in_use_at set',
+      r.status === 200 && r.json.claimed === true && r.json.data.title === 'Alpha asset 10' &&
+      r.json.data.in_use === true && r.json.data.in_use_at,
+      { title: r.json.data && r.json.data.title });
+    const cl1 = r.json.data._id;
+
+    r = await call('GET', `/api/images/${cl1}`, K);
+    ok('claim persisted (GET shows in_use true)', r.json.data.in_use === true);
+
+    r = await call('POST', '/api/images/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    const cl2 = r.json.data._id;
+    ok('second concurrent claim → a DIFFERENT image (atomic reservation)',
+      r.json.claimed === true && cl2 !== cl1, { cl1, cl2 });
+
+    r = await call('POST', `/api/images/${cl1}/release`, { key: API_KEY, body: { status: 'stopped' } });
+    ok('release stopped → in_use:false, active untouched, no error',
+      r.status === 200 && r.json.data.in_use === false && r.json.data.active === true && r.json.data.error_message === '');
+
+    r = await call('POST', `/api/images/${cl2}/release`, { key: API_KEY, body: { status: 'error' } });
+    ok('release error without error_message → 400', r.status === 400);
+
+    r = await call('POST', `/api/images/${cl2}/release`, {
+      key: API_KEY,
+      body: { status: 'error', error_message: 'Upscale failed: Real-ESRGAN crashed on tile 3' },
+    });
+    ok('release error → in_use:false + active:false + error_message recorded',
+      r.status === 200 && r.json.data.in_use === false && r.json.data.active === false &&
+      /Real-ESRGAN crashed/.test(r.json.data.error_message), r.json.data);
+
+    r = await call('POST', '/api/images/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    const cl3 = r.json.data._id;
+    ok('claim skips the paused (active:false) image', r.json.claimed === true && cl3 !== cl2);
+
+    // in_use / active filters (cl3 is claimed, cl2 is paused)
+    r = await call('GET', '/api/images?active=false&limit=100', K);
+    ok('filter active=false → paused images only (includes failed one)',
+      r.status === 200 && r.json.data.some((d) => d._id === cl2) && r.json.data.every((d) => d.active === false));
+    r = await call('GET', '/api/images?active=true&limit=100', K);
+    ok('filter active=true → excludes paused image', r.json.data.every((d) => d._id !== cl2));
+    r = await call('GET', '/api/images?in_use=true&limit=100', K);
+    ok('filter in_use=true → currently claimed only', r.json.data.some((d) => d._id === cl3) && r.json.data.every((d) => d.in_use === true));
+    r = await call('GET', '/api/images?in_use=false&limit=100', K);
+    ok('filter in_use=false → excludes claimed image', r.json.data.every((d) => d._id !== cl3));
+    r = await call('GET', '/api/images?active=banana&limit=5', K);
+    ok('bad active filter value → 400', r.status === 400);
+
+    // webapp flows: re-activate + dismiss the error message
+    r = await call('PATCH', `/api/images/${cl2}`, { password: APP_PASSWORD, body: { active: 'yes' } });
+    ok('PATCH active with non-boolean → 400', r.status === 400);
+    r = await call('PATCH', `/api/images/${cl2}`, { password: APP_PASSWORD, body: { active: true } });
+    ok('PATCH re-activate paused image → 200 + active:true', r.status === 200 && r.json.data.active === true);
+    r = await call('PATCH', `/api/images/${cl2}`, { password: APP_PASSWORD, body: { error_message: '' } });
+    ok('PATCH dismiss error_message → 200 + cleared', r.status === 200 && r.json.data.error_message === '');
+
+    r = await call('POST', `/api/images/${cl3}/release`, { key: API_KEY, body: { status: 'stopped' } });
+    ok('release cl3 (cleanup)', r.status === 200);
+
+    // pre-feature document: fields absent → still active + claimable
+    await Image.updateOne({ _id: cA }, { $unset: { active: '', in_use: '', error_message: '' } });
+    r = await call('GET', '/api/images?active=false&limit=100', K);
+    ok('pre-feature doc (no active field) NOT listed as paused', r.json.data.every((d) => d._id !== cA));
+    r = await call('GET', '/api/images?active=true&limit=100', K);
+    ok('pre-feature doc listed as active', r.json.data.some((d) => d._id === cA));
+
+    // stale reclaim: a claim older than the stale window is reclaimable
+    r = await call('POST', '/api/images/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    const cl4 = r.json.data._id;
+    await Image.updateOne({ _id: cl4 }, { $set: { in_use_at: new Date(Date.now() - 40 * 60000) } });
+    r = await call('POST', '/api/images/claim', { key: API_KEY, body: { max_upscales: 5, stale_minutes: 30 } });
+    ok('stale claim (in_use_at 40 min old) is reclaimed by the next worker',
+      r.json.claimed === true && r.json.data._id === cl4, { expected: cl4, got: r.json.data && r.json.data._id });
+    r = await call('POST', `/api/images/${cl4}/release`, { key: API_KEY, body: { status: 'stopped' } });
+    ok('reclaimed image released → 200', r.status === 200);
+
+    // a FRESH claim must NOT be stolen
+    r = await call('POST', '/api/images/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    const cl5 = r.json.data._id;
+    r = await call('POST', '/api/images/claim', { key: API_KEY, body: { max_upscales: 5, stale_minutes: 30 } });
+    ok('fresh claim is NOT stolen (another image returned)', r.json.claimed === true && r.json.data._id !== cl5);
+    await call('POST', `/api/images/${cl5}/release`, { key: API_KEY, body: { status: 'stopped' } });
+    await call('POST', `/api/images/${r.json.data._id}/release`, { key: API_KEY, body: { status: 'stopped' } });
+
+    // release on an unknown image → 404
+    r = await call('POST', '/api/images/000000000000000000000000/release', { key: API_KEY, body: { status: 'ok' } });
+    ok('release unknown image → 404', r.status === 404);
+
+    // exhaustion: claim everything, then data:null — the batch worker's exit condition
+    const claimedIds = [];
+    for (;;) {
+      const res = await call('POST', '/api/images/claim', { key: API_KEY, body: { max_upscales: 5 } });
+      if (!res.json.claimed) {
+        ok('claim → data:null + claimed:false once exhausted', res.json.data === null && res.json.claimed === false);
+        break;
+      }
+      claimedIds.push(res.json.data._id);
+    }
+    ok(`exhaustion loop: ${claimedIds.length} claims, all distinct (no double reservation)`,
+      new Set(claimedIds).size === claimedIds.length && claimedIds.length >= 10,
+      { count: claimedIds.length });
+    ok('pre-feature doc was claimable too (absent fields = eligible)', claimedIds.includes(cA));
+
+    // NB: 401 LAST on purpose — a failed auth re-arms the brute-force guard.
+    r = await call('POST', '/api/images/claim', { body: { max_upscales: 5 } });
+    ok('claim without credentials → 401', r.status === 401 && r.json.error.code === 'AUTH_REQUIRED');
+    await new Promise((resolve) => setTimeout(resolve, 450)); // let the brute-force block expire
+
     // ── summary ─────────────────────────────────────────────────────────────
     console.log(`\n══ ${passed} passed, ${failed} failed`);
   } finally {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, ImageOff, Stamp, ZoomIn } from "lucide-react";
+import { AlertTriangle, Check, ImageOff, LoaderCircle, Power, Stamp, ZoomIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StampToggle } from "./StampToggle";
 import type { StockImage } from "@/lib/types";
@@ -50,9 +50,35 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected 
             onError={() => setBroken(true)}
             className={cn(
               "h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]",
-              image.used_in_adobe_stock && "opacity-95"
+              image.used_in_adobe_stock && "opacity-95",
+              image.active === false && "opacity-70 saturate-50"
             )}
           />
+        )}
+
+        {/* batch-worker status: paused / failed / currently upscaling */}
+        {(image.active === false || image.in_use === true) && (
+          <span
+            className={cn(
+              "absolute bottom-2 left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider shadow-[var(--shadow-hard-sm)]",
+              image.in_use
+                ? "bg-brand text-white"
+                : "bg-danger-soft text-danger"
+            )}
+            data-testid="image-status-chip"
+          >
+            {image.in_use ? (
+              <>
+                <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden />
+                upscaling
+              </>
+            ) : (
+              <>
+                <Power className="h-3 w-3" aria-hidden />
+                inactive
+              </>
+            )}
+          </span>
         )}
 
         {image.used_in_adobe_stock && (
@@ -103,6 +129,16 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected 
             >
               <ZoomIn className="mr-0.5 h-3 w-3" aria-hidden />
               ×{image.upscales!.length}
+            </span>
+          )}
+          {image.error_message && (
+            <span
+              className="chip border-danger/60 text-danger"
+              title={image.error_message}
+              data-testid="image-error-chip"
+            >
+              <AlertTriangle className="mr-0.5 h-3 w-3" aria-hidden />
+              error
             </span>
           )}
           <span className="ml-auto flex items-center gap-1 font-mono text-[10px] text-ink-muted">

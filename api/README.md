@@ -39,11 +39,13 @@ authentications per IP are counted and blocked (brute-force guard).
 | POST | `/api/sessions` | create `{ "title": "…" }` (unique, 3–120 chars) | ✔ |
 | GET | `/api/sessions/:id` | one session + `imagesCount` / `usedCount` | ✔ |
 | DELETE | `/api/sessions/:id` | delete session **and all its images** | ✔ |
-| GET | `/api/images` | list + filters: `session_id`, `category`, `used_in_adobe_stock`, `quality`, `has_upscales` ∈ true/false, `upscales_lt` = N (images with fewer than N upscales), same pagination/sort as above | ✔ |
+| GET | `/api/images` | list + filters: `session_id`, `category`, `used_in_adobe_stock`, `quality`, `active` ∈ true/false (webapp Status filter), `in_use` ∈ true/false, `has_upscales` ∈ true/false, `upscales_lt` = N (images with fewer than N upscales), same pagination/sort as above | ✔ |
 | GET | `/api/images/all` | **every image in one call** — agent dedup check before generating a new batch (lean fields; `?with_links=1` adds `image_link` + `upscales`; newest first, capped at 5000 with `truncated` flag) | ✔ |
 | POST | `/api/images` | register an image (full metadata, validated) | ✔ |
+| POST | `/api/images/claim` | **parallel batch worker** — atomically reserve the oldest eligible image (upscales < `max_upscales`, active, not in use — or claim older than `stale_minutes`, default 30). Body `{ max_upscales?, stale_minutes? }` → `{ data: image \| null, claimed }`; `data: null` = nothing left, the worker stops | ✔ |
+| POST | `/api/images/:id/release` | batch worker reports the attempt outcome — `{ status: ok \| stopped \| error, error_message? }`: `ok` clears the error, `stopped` only frees the claim, `error` pauses the image (`active: false`) + records `error_message` | ✔ |
 | GET | `/api/images/:id` | one image (incl. its `upscales[]`) | ✔ |
-| PATCH | `/api/images/:id` | edit any metadata field(s) (e.g. `used_in_adobe_stock`) | ✔ |
+| PATCH | `/api/images/:id` | edit any metadata field(s) (e.g. `used_in_adobe_stock`, `active`, `error_message`) | ✔ |
 | DELETE | `/api/images/:id` | delete one image | ✔ |
 | GET | `/api/images/:id/download` | download the image (server-side proxy, `Content-Disposition`) | ✔ |
 | POST | `/api/images/:id/upscales` | register an upscaled variant (Real-ESRGAN job) — body `{ url, scale, model, public_id?, width?, height?, size_bytes?, source?, run_id?, max_upscales? }` → 409 `UPSCALE_LIMIT_REACHED` when the image already holds `max_upscales` entries | ✔ |

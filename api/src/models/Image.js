@@ -79,6 +79,38 @@ const imageSchema = new mongoose.Schema(
       index: true,
     },
 
+    // ── batch-worker coordination (parallel upscale workflow) ──
+    // active: an inactive image is EXCLUDED from every batch claim — set to
+    //   false automatically when an upscale attempt hard-fails (with
+    //   error_message below), toggled back on from the webapp once fixed.
+    // in_use / in_use_at: optimistic lock for the parallel jobs — a worker
+    //   claims an image (findOneAndUpdate sets in_use: true + in_use_at),
+    //   and MUST release it when done (POST /api/images/:id/release).
+    //   A claim older than the stale window (default 30 min) can be reclaimed
+    //   by another worker — survives jobs killed without cleanup.
+    // NOTE: images created before this feature have NO active/in_use fields —
+    // queries must treat "absent" as active:true / in_use:false ($ne filters).
+    active: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    in_use: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    in_use_at: {
+      type: Date,
+      default: null,
+    },
+    error_message: {
+      type: String,
+      trim: true,
+      maxlength: 2000,
+      default: '',
+    },
+
     // ── upscales (Real-ESRGAN derivatives, produced by GitHub Actions) ──
     // One entry per upscaled variant, appended via POST /api/images/:id/upscales.
     // The entry count is the "number of upscales" compared against the policy
@@ -148,5 +180,10 @@ const imageSchema = new mongoose.Schema(
 
 // Compound index for the most common listing: a session's images, newest first.
 imageSchema.index({ session_id: 1, createdAt: -1 });
+
+// Claim query (parallel batch workers): oldest eligible first. Partial-ish
+// coverage via the single-field indexes above is enough — the eligibility
+// filter is dominated by $expr on the upscales array (unindexable anyway).
+imageSchema.index({ createdAt: 1, _id: 1 });
 
 module.exports = mongoose.models.Image || mongoose.model('Image', imageSchema);

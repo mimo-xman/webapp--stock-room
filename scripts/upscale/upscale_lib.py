@@ -12,6 +12,8 @@ repo owner in the Actions logs. See docs/UPSCALE.md for the full guide.
 
 from __future__ import annotations
 
+import math
+import multiprocessing
 import os
 import sys
 import tempfile
@@ -128,6 +130,12 @@ DEFAULT_SCALE = 4          # mirrors the documented secret default
 DEFAULT_MAX_IMAGES = 5     # GitHub Actions free quota friendly
 DEFAULT_CLOUDINARY_FOLDER = "adobe-stock/upscales"
 
+# Parallel tile workers. "auto" = one worker per CPU core, capped at 4 —
+# the public-repo GitHub runners are 4-vCPU/16GB, and each worker runs the
+# model single-threaded so N workers use exactly N cores.
+DEFAULT_TILE_WORKERS = "auto"
+TILE_WORKERS_MAX = 16
+
 # ── output format policy ──────────────────────────────────────────────────
 # Upscales are destined for Adobe Stock: photo submissions there are JPEG.
 # A ×4 PNG (lossless) easily passes 10 Mo — Cloudinary's free-plan per-file
@@ -158,6 +166,8 @@ class JobConfig:
     output_format: str = DEFAULT_OUTPUT_FORMAT      # "jpg" (stock-ready) | "png" (lossless)
     jpeg_quality: int = DEFAULT_JPEG_QUALITY         # 80-100, stepped down if > max_upload_bytes
     max_upload_bytes: int = CLOUDINARY_FREE_MAX_BYTES - UPLOAD_SIZE_SAFETY
+    tile_workers: int = 1                            # parallel tile inference processes
+    stale_minutes: int = 30                          # claim older than this is reclaimable
 
 
 def _parse_int(value, name, minimum, maximum):
@@ -168,6 +178,14 @@ def _parse_int(value, name, minimum, maximum):
     if not (minimum <= n <= maximum):
         raise JobError(f"{name} doit être entre {minimum} et {maximum} — valeur reçue : {n}")
     return n
+
+
+def resolve_tile_workers(raw) -> int:
+    """'auto' → min(4, cpu_count) ; explicit int → clamped 1..TILE_WORKERS_MAX."""
+    value = str(raw or DEFAULT_TILE_WORKERS).strip().lower()
+    if value in ("", "auto"):
+        return max(1, min(4, os.cpu_count() or 1))
+    return _parse_int(value, "tile_workers / UPSCALE_TILE_WORKERS", 1, TILE_WORKERS_MAX)
 
 
 def build_config(args) -> JobConfig:
@@ -237,6 +255,14 @@ def build_config(args) -> JobConfig:
             "Configuration Cloudinary incomplète — il manque : " + ", ".join(cloud_missing)
         )
 
+    tile_workers = resolve_tile_workers(
+        getattr(args, "tile_workers", None) or os.environ.get("UPSCALE_TILE_WORKERS") or DEFAULT_TILE_WORKERS
+    )
+    stale_minutes = _parse_int(
+        getattr(args, "stale_minutes", None) or os.environ.get("UPSCALE_CLAIM_STALE_MINUTES") or 30,
+        "stale_minutes / UPSCALE_CLAIM_STALE_MINUTES", 1, 1440,
+    )
+
     return JobConfig(
         api_url=api_url,
         api_key=api_key,
@@ -255,6 +281,8 @@ def build_config(args) -> JobConfig:
         output_format=output_format,
         jpeg_quality=jpeg_quality,
         max_upload_bytes=max_upload_bytes,
+        tile_workers=tile_workers,
+        stale_minutes=stale_minutes,
     )
 
 
@@ -353,8 +381,9 @@ class AssetApi:
         return self._json(resp, f"GET /api/images/{image_id}")["data"]
 
     def list_eligible(self, max_upscales: int, limit: int):
-        """Images whose upscale count is BELOW max_upscales, oldest first
-        (the daily batch makes deterministic progress through the backlog)."""
+        """Images eligible for the DRY-RUN listing: upscale count BELOW
+        max_upscales, active, not currently claimed (in_use), oldest first.
+        The real processing uses claim() instead — atomic reservation."""
         collected = []
         page = 1
         while len(collected) < limit:
@@ -363,6 +392,8 @@ class AssetApi:
                 "/api/images",
                 params={
                     "upscales_lt": max_upscales,
+                    "active": "true",
+                    "in_use": "false",
                     "limit": 100,
                     "page": page,
                     "sort": "createdAt",
@@ -432,6 +463,46 @@ class AssetApi:
             )
         return self._json(resp, f"POST /api/images/{image_id}/upscales")["data"]
 
+    # ── parallel batch workers: claim / release ──
+
+    def claim(self, max_upscales: int, stale_minutes: int = 30):
+        """POST /api/images/claim — atomically reserve ONE eligible image
+        (upscales < max_upscales, active, not already claimed — a claim older
+        than stale_minutes is considered dead and reclaimable).
+
+        Returns the claimed image document, or None when nothing is claimable
+        (the worker exits its loop). The reservation is written by the same
+        findOneAndUpdate that selects the document: two concurrent workers can
+        never reserve the same image."""
+        resp = self._request(
+            "POST",
+            "/api/images/claim",
+            json={"max_upscales": max_upscales, "stale_minutes": stale_minutes},
+        )
+        body = self._json(resp, "POST /api/images/claim")
+        return body.get("data")
+
+    def release(self, image_id: str, status: str, error_message: str = ""):
+        """POST /api/images/:id/release — report the terminal state of a claim.
+
+        status:
+          'ok'      → success — in_use cleared, error_message cleared
+          'stopped' → cancelled / limit raced — in_use cleared only
+          'error'   → hard failure — in_use cleared, image set active:false
+                      and error_message recorded (visible in the webapp)
+
+        A 404 (the image was deleted meanwhile) is tolerated → returns None.
+        Best-effort by design: if the call itself fails, the stale window
+        (default 30 min) eventually frees the claim anyway."""
+        payload = {"status": status}
+        if error_message:
+            payload["error_message"] = error_message
+        resp = self._request("POST", f"/api/images/{image_id}/release", json=payload)
+        if resp.status_code == 404:
+            log(f"· release {image_id} : image introuvable (404) — ignoré")
+            return None
+        return self._json(resp, f"POST /api/images/{image_id}/release")["data"]
+
 
 # ── Cloudinary upload (happens on the runner, NOT on the API) ────────────────
 
@@ -476,6 +547,220 @@ class CloudinaryUploader:
 
 # ── Real-ESRGAN ──────────────────────────────────────────────────────────────
 
+def _build_arch(model_name: str):
+    """Build the (untrained) network for a registry model → (model, netscale)."""
+    from basicsr.archs.rrdbnet_arch import RRDBNet
+    from basicsr.archs.srvgg_arch import SRVGGNetCompact
+
+    arch = MODEL_REGISTRY[model_name]["arch"]
+    if arch == "rrdbnet_x4":
+        return (
+            RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4),
+            4,
+        )
+    if arch == "rrdbnet_x2":
+        return (
+            RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2),
+            2,
+    )
+    # srvgg_compact
+    return (
+        SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4, act_type="prelu"),
+        4,
+    )
+
+
+def _load_torch_model(model_name: str, model_path: str):
+    """Build + load the weights for a tile worker process.
+
+    Same weight-loading logic as realesrgan 0.3.0's RealESRGANer.__init__
+    (params_ema preferred over params, strict) — the parent process uses the
+    library's own loader, workers use this one: both yield identical weights."""
+    import torch
+
+    model, _ = _build_arch(model_name)
+    loadnet = torch.load(model_path, map_location=torch.device("cpu"))
+    keyname = "params_ema" if "params_ema" in loadnet else "params"
+    model.load_state_dict(loadnet[keyname], strict=True)
+    model.eval()
+    return model
+
+
+# Worker-side state — populated once per pool process by _tile_worker_init.
+_TILE_WORKER_STATE: dict = {}
+
+
+def _tile_worker_init(model_name: str, model_path: str, threads: int):
+    """Pool initializer: single-threaded torch + the model, loaded ONCE."""
+    os.environ.setdefault("OMP_NUM_THREADS", str(threads))
+    import torch
+
+    torch.set_num_threads(threads)
+    _TILE_WORKER_STATE["torch"] = torch
+    _TILE_WORKER_STATE["model"] = _load_torch_model(model_name, model_path)
+
+
+def _tile_worker_run(spec: dict):
+    """Run the model on one (padded) input tile → (index, total, cropped tile).
+
+    Exactly what the sequential tile_process does per tile: model() on the
+    padded input, then crop the part that lands in the output image. The
+    worker returns it as float32 numpy (pickled back to the parent)."""
+    torch = _TILE_WORKER_STATE["torch"]
+    model = _TILE_WORKER_STATE["model"]
+    with torch.no_grad():
+        output_tile = model(torch.from_numpy(spec["input_tile"]))
+    out_np = output_tile.contiguous().numpy()
+    sy, ey = spec["tile_crop_y"]
+    sx, ex = spec["tile_crop_x"]
+    return spec["index"], spec["total"], out_np[:, :, sy:ey, sx:ex]
+
+
+def _build_parallel_upsampler_class(RealESRGANer):
+    """RealESRGANer subclass whose tile loop runs tiles in PARALLEL processes.
+
+    WHY this is bit-identical to the stock sequential loop: the per-tile math
+    below is a VERBATIM replica of realesrgan 0.3.0 RealESRGANer.tile_process
+    (source: realesrgan/utils.py). In that loop each tile only
+      1. reads a padded slice of the (already pre-padded) input,
+      2. runs the model on it (pure function, fp32 CPU, eval mode, no_grad),
+      3. writes the CROPPED tile into a DISJOINT region of self.output.
+    There is no blending, no weight matrix and no cross-tile state — every
+    output pixel comes from exactly ONE tile. Running the model() calls in
+    worker processes and assigning the identical cropped tiles to the same
+    disjoint output regions therefore reproduces the sequential result down
+    to the last bit. Workers get the same weights (same file, strict load),
+    the same fp32 inputs (float32 numpy round-trip is lossless) and 1 torch
+    thread each, so N workers use exactly N CPU cores.
+    """
+
+    class ParallelRealESRGANer(RealESRGANer):
+        def __init__(self, *args, tile_workers: int = 1, model_name: str = "", **kwargs):
+            super().__init__(*args, **kwargs)
+            self.tile_workers = max(1, tile_workers)
+            # RealESRGANer does not keep model_path as an attribute — store it
+            # ourselves so the pool initializer can reload the weights.
+            self._model_path = args[1] if len(args) > 1 else kwargs.get("model_path", "")
+            self._model_name = model_name
+            self._pool = None
+
+        # ── pool lifecycle ──
+
+        def _ensure_pool(self):
+            if self._pool is None:
+                ctx = multiprocessing.get_context("spawn")
+                log(
+                    f"· démarrage du pool d'upscale : {self.tile_workers} worker(s), "
+                    "1 thread chacun (modèle chargé une fois par worker)…"
+                )
+                with Heartbeat(f"pool de {self.tile_workers} workers"):
+                    self._pool = ctx.Pool(
+                        processes=self.tile_workers,
+                        initializer=_tile_worker_init,
+                        initargs=(self._model_name, self._model_path, 1),
+                    )
+            return self._pool
+
+        def close_pool(self):
+            pool, self._pool = self._pool, None
+            if pool is not None:
+                pool.terminate()
+
+        # ── the parallel tile loop (verbatim slice math, see docstring) ──
+
+        def tile_process(self):
+            import torch
+
+            batch, channel, height, width = self.img.shape
+            output_height = height * self.scale
+            output_width = width * self.scale
+            output_shape = (batch, channel, output_height, output_width)
+
+            # start with black image
+            self.output = self.img.new_zeros(output_shape)
+            tiles_x = math.ceil(width / self.tile_size)
+            tiles_y = math.ceil(height / self.tile_size)
+
+            # loop over all tiles — collect the exact slice specs
+            specs = []
+            for y in range(tiles_y):
+                for x in range(tiles_x):
+                    # extract tile from input image
+                    ofs_x = x * self.tile_size
+                    ofs_y = y * self.tile_size
+                    # input tile area on total image
+                    input_start_x = ofs_x
+                    input_end_x = min(ofs_x + self.tile_size, width)
+                    input_start_y = ofs_y
+                    input_end_y = min(ofs_y + self.tile_size, height)
+
+                    # input tile area on total image with padding
+                    input_start_x_pad = max(input_start_x - self.tile_pad, 0)
+                    input_end_x_pad = min(input_end_x + self.tile_pad, width)
+                    input_start_y_pad = max(input_start_y - self.tile_pad, 0)
+                    input_end_y_pad = min(input_end_y + self.tile_pad, height)
+
+                    # input tile dimensions
+                    input_tile_width = input_end_x - input_start_x
+                    input_tile_height = input_end_y - input_start_y
+                    tile_idx = y * tiles_x + x + 1
+                    input_tile = self.img[
+                        :, :, input_start_y_pad:input_end_y_pad, input_start_x_pad:input_end_x_pad
+                    ]
+
+                    # output tile area on total image
+                    output_start_x = input_start_x * self.scale
+                    output_end_x = input_end_x * self.scale
+                    output_start_y = input_start_y * self.scale
+                    output_end_y = input_end_y * self.scale
+
+                    # output tile area without padding
+                    output_start_x_tile = (input_start_x - input_start_x_pad) * self.scale
+                    output_end_x_tile = output_start_x_tile + input_tile_width * self.scale
+                    output_start_y_tile = (input_start_y - input_start_y_pad) * self.scale
+                    output_end_y_tile = output_start_y_tile + input_tile_height * self.scale
+
+                    specs.append({
+                        "index": tile_idx,
+                        "total": tiles_x * tiles_y,
+                        # float32 copy (contiguous → numpy shares/copies losslessly)
+                        "input_tile": input_tile.contiguous().numpy(),
+                        "output_y": (output_start_y, output_end_y),
+                        "output_x": (output_start_x, output_end_x),
+                        "tile_crop_y": (output_start_y_tile, output_end_y_tile),
+                        "tile_crop_x": (output_start_x_tile, output_end_x_tile),
+                    })
+
+            def assign(spec, tile_np):
+                """Put one cropped tile into the output image (same slice math
+                as the stock loop's final assignment)."""
+                oy, oey = spec["output_y"]
+                ox, oex = spec["output_x"]
+                self.output[:, :, oy:oey, ox:oex] = torch.from_numpy(tile_np)
+
+            if self.tile_workers > 1 and len(specs) > 1:
+                pool = self._ensure_pool()
+                log(f"· {len(specs)} tuile(s) → {self.tile_workers} worker(s)…")
+                for index, total, tile_np in pool.imap_unordered(_tile_worker_run, specs):
+                    assign(specs[index - 1], tile_np)
+                    log(f"  Tile {index}/{total} ✓ (worker)")
+            else:
+                # Sequential path (workers=1, or a single-tile image) — the
+                # stock loop, run in this process: identical by construction.
+                for spec in specs:
+                    with torch.no_grad():
+                        output_tile = self.model(torch.from_numpy(spec["input_tile"]))
+                    out_np = output_tile.contiguous().numpy()
+                    assign(
+                        spec,
+                        out_np[:, :, spec["tile_crop_y"][0]:spec["tile_crop_y"][1],
+                                spec["tile_crop_x"][0]:spec["tile_crop_x"][1]],
+                    )
+                    log(f"\tTile {spec['index']}/{spec['total']}")
+
+    return ParallelRealESRGANer
+
+
 def ensure_model(model_name: str, model_dir: str) -> str:
     """Make sure the model weights exist locally (download ~64 MB on first run)."""
     spec = MODEL_REGISTRY[model_name]
@@ -509,11 +794,16 @@ def ensure_model(model_name: str, model_dir: str) -> str:
 
 
 class RealEsrganUpscaler:
-    """Lazy Real-ESRGANer wrapper (CPU, tiled to bound memory)."""
+    """Lazy Real-ESRGANer wrapper (CPU, tiled to bound memory).
 
-    def __init__(self, model_name: str, model_dir: str):
+    tile_workers > 1 dispatches the per-tile model inference to a pool of
+    worker processes — see _build_parallel_upsampler_class for the exactness
+    argument (bit-identical to the sequential loop)."""
+
+    def __init__(self, model_name: str, model_dir: str, tile_workers: int = 1):
         self.model_name = model_name
         self.model_path = ensure_model(model_name, model_dir)
+        self.tile_workers = max(1, tile_workers)
         self._upsampler = None
 
     def _load(self):
@@ -521,33 +811,37 @@ class RealEsrganUpscaler:
             return self._upsampler
 
         import torch  # lazy (heavy)
-        from basicsr.archs.rrdbnet_arch import RRDBNet
-        from basicsr.archs.srvgg_arch import SRVGGNetCompact
         from realesrgan import RealESRGANer
 
-        arch = MODEL_REGISTRY[self.model_name]["arch"]
-        if arch == "rrdbnet_x4":
-            model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
-            netscale = 4
-        elif arch == "rrdbnet_x2":
-            model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
-            netscale = 2
-        else:  # srvgg_compact
-            model = SRVGGNetCompact(num_in_ch=3, num_out_ch=3, num_feat=64, num_conv=32, upscale=4, act_type="prelu")
-            netscale = 4
+        model, netscale = _build_arch(self.model_name)
 
-        torch.set_num_threads(os.cpu_count() or 2)
-        log(f"· chargement du modèle {self.model_name} (CPU, {os.cpu_count() or 2} threads)…")
+        # One single-threaded torch per worker when the pool is active (N
+        # workers × 1 thread = exactly N cores); otherwise use every core.
+        if self.tile_workers > 1:
+            threads = max(1, (os.cpu_count() or 2) // self.tile_workers)
+        else:
+            threads = os.cpu_count() or 2
+        torch.set_num_threads(threads)
+
+        parallel_note = (
+            f", {self.tile_workers} workers parallèles"
+            if self.tile_workers > 1
+            else ""
+        )
+        log(f"· chargement du modèle {self.model_name} (CPU, {threads} thread(s){parallel_note})…")
         try:
             with Heartbeat(f"chargement du modèle {self.model_name}"):
-                self._upsampler = RealESRGANer(
+                upsampler_cls = _build_parallel_upsampler_class(RealESRGANer)
+                self._upsampler = upsampler_cls(
                     scale=netscale,
                     model_path=self.model_path,
                     model=model,
-                    tile=512,          # bounded memory on 2-core / 7 GB runners
+                    tile=512,          # bounded memory on small runners
                     tile_pad=32,
                     pre_pad=0,
                     half=False,         # CPU → fp32
+                    tile_workers=self.tile_workers,
+                    model_name=self.model_name,
                 )
         except Exception as e:
             raise JobError(
@@ -555,6 +849,12 @@ class RealEsrganUpscaler:
                 "(vérifiez requirements.txt et le patch basicsr dans le workflow)"
             )
         return self._upsampler
+
+    def close(self) -> None:
+        """Terminate the worker pool (if any) — safe to call repeatedly."""
+        up = self._upsampler
+        if up is not None and hasattr(up, "close_pool"):
+            up.close_pool()
 
     def upscale(self, in_path: str, out_path: str, outscale: int, *,
                 output_format: str = DEFAULT_OUTPUT_FORMAT,

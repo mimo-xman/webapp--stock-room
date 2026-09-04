@@ -44,6 +44,14 @@ export default function ImagesPage() {
       options: CATEGORIES.map((c) => ({ value: c, label: c })),
     },
     {
+      key: "active",
+      label: "Status",
+      options: [
+        { value: "true", label: "Active" },
+        { value: "false", label: "Paused (failed)" },
+      ],
+    },
+    {
       key: "used_in_adobe_stock",
       label: "Adobe Stock",
       options: [
@@ -80,11 +88,18 @@ export default function ImagesPage() {
     }
   }
 
-  /** Detail dialog reports upscale mutations (mark used / delete) with the
-   *  updated image — refresh the detail state and the grid row in place. */
+  /** Detail dialog reports upscale mutations (mark used / delete) and
+   *  batch-status changes (pause / error dismissed) with the updated image —
+   *  refresh the detail state and the grid row in place. */
   function handleImageUpdate(updated: StockImage) {
     setDetail((d) => (d && d._id === updated._id ? updated : d));
-    list.patchLocal(updated._id, { upscales: updated.upscales });
+    list.patchLocal(updated._id, {
+      upscales: updated.upscales,
+      active: updated.active,
+      in_use: updated.in_use,
+      in_use_at: updated.in_use_at,
+      error_message: updated.error_message,
+    });
   }
 
   async function deleteImage(image: StockImage) {
