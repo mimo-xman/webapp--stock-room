@@ -45,9 +45,10 @@ Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de p
 |---|---|---|
 | `api/` | API Node.js + Express + Mongoose (Sessions/Images, auth double, validation zod, rate limit, pagination/search/filter/sort backend, proxy download, cascade delete, **upscales** : endpoints + filtres + cap serveur, **`GET /api/images/all`** : toute la librairie en un appel pour l'anti-doublons de l'agent) | **Render** (runtime Node) |
 | `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used · Adobe Stock », copy icons, modales custom, **navigation prev/next en boucle dans le détail** : flèches sur la preview + touches ←/→ + compteur `n / total`, **affichage des upscales** : preview Original/×N, Mark used / Download / Delete, **export CSV Adobe Stock** : sélection multi-pages originaux + upscales → fichier `Filename,Title,Keywords,Category` téléchargeable, **statut batch** : badges upscaling/inactive, bannière d'erreur + Dismiss, bouton Active/Paused, **page « Agent prompt »** : formulaire des variables + validation → prompt généré copiable/téléchargeable en .md) | **Netlify** |
-| `AGENT_PROMPT.md` | **Le prompt réutilisable** à donner à l'agent (variables à remplacer + prompt Lyra inclus verbatim) | — |
+| `AGENT_PROMPT.md` | **Le prompt réutilisable** à donner à l'agent (variables à remplacer + HARD RULES anti-êtres-vivants / anti-visages-et-parties-du-corps / conformité Adobe Stock recherchée en direct à chaque run + contrôle visuel pré-enregistrement + prompt Lyra inclus verbatim) | — |
 | `.github/workflows/` | **Jobs d'upscale Real-ESRGAN** : batch quotidien 08:00 Maroc + job manuel image unique (réveil auto de l'API Render, logs heartbeat, sortie JPEG prête Adobe Stock) | **GitHub Actions** |
 | `scripts/upscale/` | Scripts Python partagés des jobs (API client, Cloudinary, Real-ESRGAN) | — |
+| `scripts/gen-prompt-template.py` | Régénère le fallback bundlé de la page « Agent prompt » (`web/src/lib/agent-prompt-template.ts`) depuis `AGENT_PROMPT.md` — à lancer après chaque édition du prompt | — |
 
 ## Déploiement
 
@@ -90,9 +91,10 @@ Après déploiement : `https://<service>.onrender.com/` affiche la page de docs 
 ### 4. Utilisation
 
 Copie `AGENT_PROMPT.md`, remplace les `[VARIABLES]` (nombre d'images, liens des 2 APIs, les 2
-clés, liens des repos), et envoie-le à ton agent. Il fait tout : recherche → **anti-doublons
-(`GET /api/images/all` — il vérifie la librairie existante avant de générer)** → prompts
-(Lyra) → génération → session → enregistrement → rapport. La webapp te permet ensuite de
+clés, liens des repos), et envoie-le à ton agent. Il fait tout : recherche des règles Adobe Stock
+actuelles + de la demande → **anti-doublons (`GET /api/images/all` — il vérifie la librairie
+existante avant de générer)** → prompts (Lyra) → génération → **contrôle visuel (HARD RULES)** →
+session → enregistrement → rapport. La webapp te permet ensuite de
 parcourir, trier, filtrer, copier les métadonnées (titre / catégorie / keywords), télécharger
 les images, marquer ce qui a été uploadé sur Adobe Stock (tampon vert), et **générer le CSV
 d'upload Adobe Stock** pour un lot sélectionné.
@@ -145,11 +147,28 @@ exportées réutilisent les métadonnées de leur image d'origine.
 
 ➡️ **Détails + table des catégories : [`docs/CSV_EXPORT.md`](docs/CSV_EXPORT.md)**
 
-## Règle métier absolue
+## Règles métier absolues
 
-**Aucun être vivant dans les images générées** (ni humains, ni animaux — silhouettes et
-illustrations incluses ; plantes/fleurs autorisées). La règle est inscrite en dur dans
-`AGENT_PROMPT.md` (HARD RULES n°1).
+**1 — Aucun être vivant dans les images générées** (ni humains, ni animaux — silhouettes,
+illustrations et ombres incluses ; plantes/fleurs autorisées).
+
+**2 — Aucun visage ni partie du corps, même sur un objet non vivant (zéro tolérance).**
+Cas réels déjà rejetés : citrouilles **jack-o'-lantern** (visage sculpté — yeux, nez, bouche).
+Même sanction pour : statues/bustes/mannequins/robots/jouets avec visage, masques, crânes,
+mains, pieds, empreintes, yeux/bouches en gros plan, pareidolia (nuages, nœuds de bois,
+cailloux « qui ressemblent à un visage »), motifs façon visage dans les textures/abstrait.
+Tout ce qu'un regard peut identifier comme visage ou partie du corps est refusé — même sans
+aucun être vivant dans l'image.
+
+**3 — Conformité Adobe Stock à jour (images destinées à la vente).** L'agent ne mémorise pas
+les règles : à chaque run, il **cherche sur le web les règles officielles actuelles**
+("Adobe Stock content requirements", "submission guidelines", politique contenus IA) et les
+applique par-dessus les HARD RULES. Recherche impossible → comportement conservateur +
+signalement dans le rapport.
+
+Ces règles sont inscrites en dur dans `AGENT_PROMPT.md` (HARD RULES n°1–3), complétées par
+un **contrôle visuel obligatoire de chaque image générée avant enregistrement** (STEP 4) —
+toute image non conforme n'est pas sauvegardée, pas comptée, et remplacée.
 
 ## Développement local
 
