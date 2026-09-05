@@ -1,7 +1,10 @@
-# Stockroom API — asset database
+# Stock Room API — asset database
 
 Node.js + Express + Mongoose API that stores generation **Sessions** and **Images**
-(with Adobe Stock upload metadata) for the *Adobe Stock — Images Generator by agents* pipeline.
+(with upload metadata — Adobe Stock today, any platform tomorrow) for the *Stock Room*
+pipeline. Stock Room is mission-agnostic: an AI agent creates one session per mission
+(Adobe Stock batch, Etsy coloring book, Instagram event visuals…) and registers every
+generated image inside it.
 
 ## Run
 

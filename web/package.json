@@ -1,8 +1,8 @@
 {
-  "name": "myadobestock",
+  "name": "stock-room",
   "version": "1.0.0",
   "private": true,
-  "description": "Stockroom — web app for Adobe Stock - Images Generator by agents (password-gated asset manager for generation sessions and images).",
+  "description": "Stock Room — password-gated web app for the mission-agnostic AI image asset dispatch (one session per mission, every generated image registered with its metadata).",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

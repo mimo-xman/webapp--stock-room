@@ -58,9 +58,9 @@ export default function GatePage() {
           <span className="flex h-10 w-10 -rotate-3 items-center justify-center bg-brand font-display text-base font-bold text-white shadow-[var(--shadow-hard-sm)]">
             SR
           </span>
-          <h1 className="mt-4 font-display text-3xl font-bold uppercase tracking-tight">Stockroom</h1>
+          <h1 className="mt-4 font-display text-3xl font-bold uppercase tracking-tight">Stock Room</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            Adobe Stock — images generator by agents
+            AI image asset dispatch — one session per mission
           </p>
         </div>
 
@@ -97,7 +97,7 @@ export default function GatePage() {
             className="mt-4 flex h-10 w-full items-center justify-center gap-2 bg-brand font-display text-sm font-bold uppercase tracking-widest text-white transition-colors hover:bg-brand-deep disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <ArrowRight className="h-4 w-4" aria-hidden />}
-            {busy ? "Checking…" : "Enter the stockroom"}
+            {busy ? "Checking…" : "Enter the stock room"}
           </button>
           <p className="mt-5 font-mono text-[10px] uppercase leading-relaxed tracking-wider text-ink-muted">
             Restricted access · typed once per tab session · lock icon ends it

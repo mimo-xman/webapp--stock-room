@@ -1,80 +1,138 @@
 "use client";
 
 /**
- * Agent prompt generator — fills the [BRACKETED VARIABLES] of AGENT_PROMPT.md
- * from a form, validates everything, then lets the owner copy the final
- * prompt or download it as a .md file (instead of copying the repo file and
- * replacing the variables by hand).
+ * Agent prompts generator — pick a mission prompt (main / Adobe Stock /
+ * coloring book…), fill the shared connection variables once, add the
+ * mission-specific variable, validate, then copy or download the
+ * ready-to-send prompt as a .md file.
  *
- * The template is loaded LIVE from GitHub (public repo, CORS-open) with a
- * bundled fallback. Values persist in localStorage — including the API keys,
- * same as the app password (the owner's own browser).
+ * Templates load LIVE from GitHub (public repo, CORS-open) with a bundled
+ * fallback per prompt. Shared values persist in localStorage across prompts —
+ * including the API keys, same as the app password (the owner's own browser).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  BookOpen,
   Check,
   Copy,
   Download,
   Eye,
   EyeOff,
   FileText,
+  Plug,
   RefreshCw,
   Sparkles,
+  Store,
+  Target,
   Trash2,
 } from "lucide-react";
 import { TopBar } from "@/components/app/TopBar";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import {
-  EMPTY_VALUES,
-  PROMPT_VARS,
+  EMPTY_SHARED_VALUES,
+  PROMPTS,
+  type PromptDefinition,
   type PromptValues,
   type TemplateSource,
-  clearSavedValues,
+  clearAllSavedValues,
   downloadPromptFile,
   findUnreplacedTokens,
-  loadSavedValues,
+  getPrompt,
+  hasAnySavedValues,
+  loadSharedValues,
+  loadSpecificValues,
   loadTemplate,
+  promptVars,
   renderTemplate,
-  saveValues,
+  saveSharedValues,
+  saveSpecificValues,
   validateAll,
-} from "@/lib/agent-prompt";
+} from "@/lib/prompts";
+
+const SELECTED_KEY = "prompt-selected";
+
+const ICONS = {
+  sparkles: Sparkles,
+  store: Store,
+  book: BookOpen,
+} as const;
 
 export default function AgentPromptPage() {
   const { toast } = useToast();
 
-  const [values, setValues] = useState<PromptValues>(EMPTY_VALUES);
+  const [promptId, setPromptId] = useState<string>(PROMPTS[0].id);
+  const [shared, setShared] = useState<PromptValues>(EMPTY_SHARED_VALUES);
+  const [specific, setSpecific] = useState<Record<string, PromptValues>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [prompt, setPrompt] = useState<string | null>(null);
-  const [templateSource, setTemplateSource] = useState<TemplateSource | null>(null);
-  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [templateSources, setTemplateSources] = useState<Record<string, TemplateSource | null>>({});
+  const [templateErrors, setTemplateErrors] = useState<Record<string, string | null>>({});
   const [loadingTemplate, setLoadingTemplate] = useState(true);
   const [hasSaved, setHasSaved] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    const saved = loadSavedValues();
-    if (saved) {
-      setValues(saved);
-      setHasSaved(true);
-    }
-    void refreshTemplate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const selected: PromptDefinition = useMemo(
+    () => getPrompt(promptId) ?? PROMPTS[0],
+    [promptId]
+  );
+  const values: PromptValues = useMemo(
+    () => ({ ...shared, ...(specific[selected.id] ?? {}) }),
+    [shared, specific, selected]
+  );
 
-  const refreshTemplate = useCallback(async () => {
+  const refreshTemplate = useCallback(async (p: PromptDefinition) => {
     setLoadingTemplate(true);
-    const loaded = await loadTemplate();
-    setTemplateSource(loaded.source);
-    setTemplateError(loaded.error ?? null);
+    const loaded = await loadTemplate(p);
+    setTemplateSources((prev) => ({ ...prev, [p.id]: loaded.source }));
+    setTemplateErrors((prev) => ({ ...prev, [p.id]: loaded.error ?? null }));
     setLoadingTemplate(false);
   }, []);
 
+  useEffect(() => {
+    // hydrate saved values after mount (one-time migration from the old
+    // single-prompt storage happens inside loadSharedValues)
+    void (async () => {
+      const savedId = getPrompt(localStorage.getItem(SELECTED_KEY) ?? "")?.id;
+      if (savedId) setPromptId(savedId);
+      setShared(loadSharedValues());
+      setSpecific(Object.fromEntries(PROMPTS.map((p) => [p.id, loadSpecificValues(p)])));
+      setHasSaved(hasAnySavedValues());
+      void refreshTemplate(getPrompt(savedId ?? PROMPTS[0].id) ?? PROMPTS[0]);
+    })();
+  }, []);
+
+  function selectPrompt(id: string) {
+    if (id === promptId || prompt !== null) {
+      // switching would drop the generated result — ask the user via the chip
+      if (prompt !== null) {
+        toast({
+          variant: "destructive",
+          title: "Prompt already generated",
+          description: "Copy or download it first — switching clears the result.",
+        });
+        return;
+      }
+      return;
+    }
+    setPromptId(id);
+    setErrors({});
+    try {
+      localStorage.setItem(SELECTED_KEY, id);
+    } catch {
+      /* ignore */
+    }
+    const next = getPrompt(id) ?? PROMPTS[0];
+    if (templateSources[id] === undefined || templateSources[id] === null) void refreshTemplate(next);
+  }
+
   function set(key: string, value: string) {
-    setValues((prev) => ({ ...prev, [key]: value }));
+    const isShared = key in EMPTY_SHARED_VALUES;
+    if (isShared) setShared((prev) => ({ ...prev, [key]: value }));
+    else setSpecific((prev) => ({ ...prev, [selected.id]: { ...(prev[selected.id] ?? {}), [key]: value } }));
     setErrors((prev) => {
       if (!prev[key]) return prev;
       const next = { ...prev };
@@ -85,7 +143,7 @@ export default function AgentPromptPage() {
   }
 
   function generate() {
-    const found = validateAll(values);
+    const found = validateAll(selected, values);
     setErrors(found);
     if (Object.keys(found).length > 0) {
       toast({
@@ -95,21 +153,14 @@ export default function AgentPromptPage() {
       });
       return;
     }
-    if (loadingTemplate || templateSource === null) {
-      toast({
-        variant: "destructive",
-        title: "Template not loaded yet",
-        description: "The prompt template is still loading — try again in a second.",
-      });
-      return;
-    }
     void (async () => {
-      const loaded = await loadTemplate();
-      const { prompt: rendered } = renderTemplate(loaded.template, values);
-      setTemplateSource(loaded.source);
-      setTemplateError(loaded.error ?? null);
+      const loaded = await loadTemplate(selected);
+      setTemplateSources((prev) => ({ ...prev, [selected.id]: loaded.source }));
+      setTemplateErrors((prev) => ({ ...prev, [selected.id]: loaded.error ?? null }));
+      const { prompt: rendered } = renderTemplate(selected, loaded.template, values);
       setPrompt(rendered);
-      saveValues(values);
+      saveSharedValues(shared);
+      saveSpecificValues(selected, specific[selected.id] ?? {});
       setHasSaved(true);
       toast({
         title: "Prompt generated",
@@ -136,38 +187,85 @@ export default function AgentPromptPage() {
 
   function download() {
     if (!prompt) return;
-    const filename = downloadPromptFile(prompt, values);
+    const filename = downloadPromptFile(prompt, selected);
     toast({ title: "Downloaded", description: `${filename} saved to your downloads.` });
   }
 
   function clearSaved() {
-    clearSavedValues();
+    clearAllSavedValues();
+    setShared(EMPTY_SHARED_VALUES);
+    setSpecific({});
     setHasSaved(false);
     toast({
       title: "Saved values cleared",
-      description: "The form values (incl. API keys) were removed from this browser.",
+      description: "The connection values (incl. API keys) were removed from this browser.",
     });
   }
 
   const unreplaced = prompt ? findUnreplacedTokens(prompt) : [];
-  const filledCount = PROMPT_VARS.filter((v) => (values[v.key] ?? "").trim()).length;
+  const vars = promptVars(selected);
+  const filledCount = vars.filter((v) => (values[v.key] ?? "").trim()).length;
+  const templateSource = templateSources[selected.id] ?? null;
+  const templateError = templateErrors[selected.id] ?? null;
 
   return (
     <>
       <TopBar />
       <main className="mx-auto max-w-7xl space-y-4 px-4 py-6 sm:px-6">
         <div>
-          <h1 className="font-display text-3xl font-bold uppercase tracking-tight">Agent prompt</h1>
+          <h1 className="font-display text-3xl font-bold uppercase tracking-tight">Agent prompts</h1>
           <p className="font-mono text-xs text-ink-muted">
-            fill the variables once → validate → copy or download the ready-to-send prompt
+            pick a mission → fill the variables once → validate → copy or download the ready-to-send prompt
           </p>
         </div>
+
+        {/* ── prompt switcher (scalable: one card per mission type) ── */}
+        <section aria-label="Prompt selection" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {PROMPTS.map((p) => {
+            const Icon = ICONS[p.icon];
+            const active = p.id === selected.id;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => selectPrompt(p.id)}
+                aria-pressed={active}
+                className={cn(
+                  "flex items-start gap-3 border p-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-brand",
+                  active
+                    ? "border-brand bg-brand-soft shadow-[var(--shadow-hard-sm)]"
+                    : "border-line-strong bg-surface hover:border-ink"
+                )}
+              >
+                <span
+                  className={cn(
+                    "mt-0.5 flex h-7 w-7 shrink-0 -rotate-3 items-center justify-center",
+                    active ? "bg-brand text-white" : "bg-paper text-ink-muted"
+                  )}
+                >
+                  <Icon className="h-4 w-4" aria-hidden />
+                </span>
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2">
+                    <span className="font-display text-sm font-bold uppercase tracking-wide text-ink">
+                      {p.title}
+                    </span>
+                    <span className="chip shrink-0 border-line bg-paper lowercase">{p.purpose}</span>
+                  </span>
+                  <span className="mt-0.5 block text-[12.5px] leading-snug text-ink-muted">{p.tagline}</span>
+                </span>
+              </button>
+            );
+          })}
+        </section>
 
         <div className="grid gap-4 lg:grid-cols-[minmax(320px,430px)_minmax(0,1fr)]">
           {/* ── form column ── */}
           <section className="space-y-4 border border-line-strong bg-surface p-4 shadow-[var(--shadow-hard-sm)]">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="eyebrow">Variables ({filledCount}/{PROMPT_VARS.length})</h2>
+              <h2 className="eyebrow">
+                {selected.title} — variables ({filledCount}/{vars.length})
+              </h2>
               {hasSaved && (
                 <button
                   type="button"
@@ -182,56 +280,51 @@ export default function AgentPromptPage() {
               )}
             </div>
 
-            {PROMPT_VARS.map((v) => (
-              <div key={v.key} className="space-y-1">
-                <label
-                  htmlFor={`var-${v.key}`}
-                  className="flex items-baseline justify-between gap-2 text-sm font-semibold text-ink"
-                >
-                  <span>
-                    {v.label}
-                    <span className="ml-1 font-mono text-[10px] uppercase text-danger">*</span>
-                  </span>
-                  <span className="font-mono text-[10px] text-ink-muted">{v.type}</span>
-                </label>
-                <div className="relative">
-                  <input
-                    id={`var-${v.key}`}
-                    type={v.type === "secret" && !revealed[v.key] ? "password" : v.type === "number" ? "number" : "text"}
-                    inputMode={v.type === "number" ? "numeric" : undefined}
-                    value={values[v.key] ?? ""}
-                    placeholder={v.placeholder}
-                    autoComplete="off"
-                    spellCheck={false}
-                    onChange={(e) => set(v.key, e.target.value)}
-                    aria-invalid={Boolean(errors[v.key])}
-                    className={cn(
-                      "w-full border bg-paper px-3 py-2 font-mono text-[13px] text-ink transition-colors focus-visible:outline-2 focus-visible:outline-brand",
-                      errors[v.key] ? "border-danger" : "border-line-strong hover:border-ink focus:border-ink",
-                      v.type === "secret" && "pr-10"
-                    )}
-                  />
-                  {v.type === "secret" && (
-                    <button
-                      type="button"
-                      onClick={() => setRevealed((r) => ({ ...r, [v.key]: !r[v.key] }))}
-                      className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-ink-muted transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-brand"
-                      aria-label={revealed[v.key] ? "Hide this API key" : "Show this API key"}
-                    >
-                      {revealed[v.key] ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
-                    </button>
-                  )}
-                </div>
-                {errors[v.key] ? (
-                  <p className="flex items-center gap-1 font-mono text-[11px] text-danger" role="alert">
-                    <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
-                    {errors[v.key]}
-                  </p>
-                ) : (
-                  <p className="font-mono text-[11px] leading-snug text-ink-muted">{v.help}</p>
+            {/* shared connection variables */}
+            <div>
+              <h3 className="mb-2 flex items-center gap-1.5 border-b border-line pb-1.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-ink">
+                <Plug className="h-3.5 w-3.5 text-brand" aria-hidden />
+                Connection — shared across all prompts
+              </h3>
+              <div className="space-y-3 pt-2">
+                {vars.map((v) =>
+                  v.key in EMPTY_SHARED_VALUES ? (
+                    <VarField
+                      key={v.key}
+                      v={v}
+                      value={values[v.key] ?? ""}
+                      error={errors[v.key]}
+                      revealed={revealed[v.key]}
+                      onReveal={() => setRevealed((r) => ({ ...r, [v.key]: !r[v.key] }))}
+                      onChange={(value) => set(v.key, value)}
+                    />
+                  ) : null
                 )}
               </div>
-            ))}
+            </div>
+
+            {/* mission-specific variables */}
+            <div>
+              <h3 className="mb-2 flex items-center gap-1.5 border-b border-line pb-1.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-ink">
+                <Target className="h-3.5 w-3.5 text-brand" aria-hidden />
+                Mission — specific to this prompt
+              </h3>
+              <div className="space-y-3 pt-2">
+                {vars.map((v) =>
+                  v.key in EMPTY_SHARED_VALUES ? null : (
+                    <VarField
+                      key={v.key}
+                      v={v}
+                      value={values[v.key] ?? ""}
+                      error={errors[v.key]}
+                      revealed={revealed[v.key]}
+                      onReveal={() => setRevealed((r) => ({ ...r, [v.key]: !r[v.key] }))}
+                      onChange={(value) => set(v.key, value)}
+                    />
+                  )
+                )}
+              </div>
+            </div>
 
             <button
               type="button"
@@ -244,8 +337,8 @@ export default function AgentPromptPage() {
             </button>
 
             <p className="border border-line bg-paper p-2.5 font-mono text-[10.5px] leading-relaxed text-ink-muted">
-              After generating, the values — including the API keys — are saved in this
-              browser only (localStorage), like the app password. Use “clear saved” to wipe them.
+              The connection values — including the API keys — are saved in this browser only
+              (localStorage) and reused by every prompt. Use “clear saved” to wipe them.
             </p>
           </section>
 
@@ -254,7 +347,7 @@ export default function AgentPromptPage() {
             <div className="flex flex-wrap items-center gap-2 border-b border-line bg-paper p-3">
               <h2 className="eyebrow mr-auto flex items-center gap-1.5">
                 <FileText className="h-3.5 w-3.5" aria-hidden />
-                Generated prompt
+                Generated prompt — {selected.title}
               </h2>
 
               <span
@@ -268,7 +361,7 @@ export default function AgentPromptPage() {
                 )}
                 title={
                   templateSource === "live"
-                    ? `Template fetched live from GitHub main — always in sync with AGENT_PROMPT.md${templateError ? ` (note: ${templateError})` : ""}`
+                    ? `Template fetched live from GitHub main — always in sync with ${selected.file}${templateError ? ` (note: ${templateError})` : ""}`
                     : templateError || "Loading template…"
                 }
               >
@@ -283,7 +376,7 @@ export default function AgentPromptPage() {
 
               <button
                 type="button"
-                onClick={() => void refreshTemplate()}
+                onClick={() => void refreshTemplate(selected)}
                 disabled={loadingTemplate}
                 className="flex h-7 w-7 items-center justify-center border border-line-strong bg-surface text-ink-muted transition-colors hover:border-ink hover:text-ink disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-brand"
                 aria-label="Re-fetch the template from GitHub"
@@ -327,7 +420,7 @@ export default function AgentPromptPage() {
                   <Sparkles className="h-8 w-8" aria-hidden />
                   <p className="max-w-sm font-mono text-xs leading-relaxed">
                     Fill every variable on the left and click <strong className="text-ink">Generate prompt</strong>.
-                    The result — everything below the ✂ CUT line of AGENT_PROMPT.md with your
+                    The result — everything below the ✂ CUT line of {selected.file} with your
                     values in place — appears here, ready to copy or download.
                   </p>
                 </div>
@@ -370,5 +463,92 @@ export default function AgentPromptPage() {
         </div>
       </main>
     </>
+  );
+}
+
+interface VarFieldProps {
+  v: {
+    key: string;
+    label: string;
+    help: string;
+    placeholder: string;
+    type: "number" | "url" | "secret" | "text";
+    multiline?: boolean;
+  };
+  value: string;
+  error?: string;
+  revealed?: boolean;
+  onReveal: () => void;
+  onChange: (value: string) => void;
+}
+
+function VarField({ v, value, error, revealed, onReveal, onChange }: VarFieldProps) {
+  const id = `var-${v.key}`;
+  return (
+    <div className="space-y-1">
+      <label
+        htmlFor={id}
+        className="flex items-baseline justify-between gap-2 text-sm font-semibold text-ink"
+      >
+        <span>
+          {v.label}
+          <span className="ml-1 font-mono text-[10px] uppercase text-danger">*</span>
+        </span>
+        <span className="font-mono text-[10px] text-ink-muted">{v.multiline ? "text" : v.type}</span>
+      </label>
+      {v.multiline ? (
+        <textarea
+          id={id}
+          rows={4}
+          value={value}
+          placeholder={v.placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(e) => onChange(e.target.value)}
+          aria-invalid={Boolean(error)}
+          className={cn(
+            "w-full border bg-paper px-3 py-2 text-[13px] leading-relaxed text-ink transition-colors focus-visible:outline-2 focus-visible:outline-brand",
+            error ? "border-danger" : "border-line-strong hover:border-ink focus:border-ink"
+          )}
+        />
+      ) : (
+        <div className="relative">
+          <input
+            id={id}
+            type={v.type === "secret" && !revealed ? "password" : v.type === "number" ? "number" : "text"}
+            inputMode={v.type === "number" ? "numeric" : undefined}
+            value={value}
+            placeholder={v.placeholder}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(e) => onChange(e.target.value)}
+            aria-invalid={Boolean(error)}
+            className={cn(
+              "w-full border bg-paper px-3 py-2 font-mono text-[13px] text-ink transition-colors focus-visible:outline-2 focus-visible:outline-brand",
+              error ? "border-danger" : "border-line-strong hover:border-ink focus:border-ink",
+              v.type === "secret" && "pr-10"
+            )}
+          />
+          {v.type === "secret" && (
+            <button
+              type="button"
+              onClick={onReveal}
+              className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-ink-muted transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-brand"
+              aria-label={revealed ? "Hide this API key" : "Show this API key"}
+            >
+              {revealed ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
+            </button>
+          )}
+        </div>
+      )}
+      {error ? (
+        <p className="flex items-center gap-1 font-mono text-[11px] text-danger" role="alert">
+          <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+          {error}
+        </p>
+      ) : (
+        <p className="font-mono text-[11px] leading-snug text-ink-muted">{v.help}</p>
+      )}
+    </div>
   );
 }

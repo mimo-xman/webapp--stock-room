@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: adobe-stock-images-generator-api
+    name: stock-room-api
     runtime: node
     rootDir: api
     plan: free

@@ -1,20 +1,28 @@
-# ── Adobe Stock — Images Generator by agents ──
+# ── Stock Room ──
 
-Pipeline complet de production d'images IA pour Adobe Stock : un **agent IA** recherche les
-sujets en demande, génère les images via l'API [zazogptimage2api](https://github.com/mimo-xman/nodejs--api-for-gpt-image-2),
-et enregistre chaque asset (image + métadonnées d'upload Adobe Stock) dans une base de données.
-Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de passe.
+**Stock Room** est le hub de dispatch des images générées par IA : un **agent IA** reçoit une
+mission (batch Adobe Stock, coloring book Etsy, visuels d'événement Instagram, scènes d'une
+vidéo, créations publicitaires…), génère les images via l'API
+[Zazo Image Studio](https://github.com/mimo-xman/nodejs--api-for-gpt-image-2),
+et enregistre chaque asset (image + métadonnées) dans une base de données, **une Session par
+mission**. Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de passe.
+
+> Historique : le projet s'appelait *Adobe Stock — Images Generator by agents* car la
+> première mission était la production d'images pour Adobe Stock. Le nom a changé quand les
+> missions se sont multipliées (Etsy, Redbubble, Instagram, pubs, scènes vidéo…) : Stock Room
+> est **agnostique de la plateforme** — le dépôt GitHub garde son nom d'origine uniquement
+> pour ne pas casser les URLs.
 
 ```
-┌─────────────┐   1. prompt agent    ┌──────────────┐
-│  AI Agent   │ ───────────────────► │  Toi (owner) │  tu colles AGENT_PROMPT.md
-└──────┬──────┘                      └──────────────┘
-       │ 2. recherche web (tendances Adobe Stock)
+┌─────────────┐   1. agent prompt (mission)    ┌──────────────┐
+│  AI Agent   │ ────────────────────────────► │  Toi (owner) │  tu colles le prompt rempli
+└──────┬──────┘                               └──────────────┘
+       │ 2. recherche web (règles + demande de la plateforme cible)
        │ 3. POST /generate
        ▼
 ┌──────────────────┐  image URL   ┌─────────────────────────────────┐
-│ zazogptimage2api │ ───────────► │  THIS API  (Render)             │
-│  (Render, Tor)   │              │  Sessions + Images (MongoDB)    │
+│ Zazo Image Studio│ ───────────► │  Stock Room API  (Render)       │
+│  (Render, Tor)   │              │  Sessions → Images (MongoDB)    │
 └──────────────────┘              └───────────────┬─────────────────┘
                                                   │ 4. lecture/édition
                                                   ▼
@@ -30,6 +38,22 @@ Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de p
                                         └─────────────────────────────────┘
 ```
 
+## Les missions = des agent prompts
+
+Chaque type de mission a son prompt prêt à envoyer, dans [`prompts/`](prompts/) (l'index
+détaillé est dans [`AGENT_PROMPT.md`](AGENT_PROMPT.md)) :
+
+| Prompt | Mission | Variable spécifique |
+|---|---|---|
+| [`prompts/main.md`](prompts/main.md) | **Universel** — explique les deux APIs + la structure Session → Images ; tu décris la mission (n'importe quoi : visuels Instagram, scènes vidéo, pubs…) | `[MISSION BRIEF]` |
+| [`prompts/adobe-stock.md`](prompts/adobe-stock.md) | Batch **Adobe Stock** — règles dures (aucun être vivant, aucun visage/partie du corps), recherche live des règles, métadonnées prêtes à l'upload | `[NUMBER OF PROMPTS TO CREATE]` |
+| [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Coloring book Etsy** — pages line-art pour enfants + couverture, règles Etsy recherchées live, print-ready | `[BOOK THEME]`, `[NUMBER OF COLORING PAGES]` |
+
+La webapp (page **Agent prompts**) remplie, valide et exporte ces prompts — les six variables
+de connexion (les 2 URLs + 2 clés + 2 repos) sont partagées entre tous les prompts et
+sauvegardées une fois pour toutes dans le navigateur. Ajouter un 4ᵉ prompt = un fichier
+`.md` dans `prompts/` + une entrée dans `web/src/lib/prompts.ts`.
+
 ## Aperçu de la webapp
 
 | | |
@@ -44,11 +68,12 @@ Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de p
 | Chemin | Contenu | Hébergement |
 |---|---|---|
 | `api/` | API Node.js + Express + Mongoose (Sessions/Images, auth double, validation zod, rate limit, pagination/search/filter/sort backend, proxy download, cascade delete, **upscales** : endpoints + filtres + cap serveur, **`GET /api/images/all`** : toute la librairie en un appel pour l'anti-doublons de l'agent) | **Render** (runtime Node) |
-| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used · Adobe Stock », copy icons, modales custom, **navigation prev/next en boucle dans le détail** : flèches sur la preview + touches ←/→ + compteur `n / total`, **affichage des upscales** : preview Original/×N, Mark used / Download / Delete, **export CSV Adobe Stock** : sélection multi-pages originaux + upscales → fichier `Filename,Title,Keywords,Category` téléchargeable, **statut batch** : badges upscaling/inactive, bannière d'erreur + Dismiss, bouton Active/Paused, **page « Agent prompt »** : formulaire des variables + validation → prompt généré copiable/téléchargeable en .md) | **Netlify** |
-| `AGENT_PROMPT.md` | **Le prompt réutilisable** à donner à l'agent (variables à remplacer + HARD RULES anti-êtres-vivants / anti-visages-et-parties-du-corps / conformité Adobe Stock recherchée en direct à chaque run + contrôle visuel pré-enregistrement + prompt Lyra inclus verbatim) | — |
-| `.github/workflows/` | **Jobs d'upscale Real-ESRGAN** : batch quotidien 08:00 Maroc + job manuel image unique (réveil auto de l'API Render, logs heartbeat, sortie JPEG prête Adobe Stock) | **GitHub Actions** |
+| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used », copy icons, modales custom, **navigation prev/next en boucle dans le détail**, **affichage des upscales**, **export CSV Adobe Stock**, **statut batch**, **page « Agent prompts »** : switcher multi-prompts + variables partagées + validation → prompt généré copiable/téléchargeable en .md, **favicon + apple-icon** « SR ») | **Netlify** |
+| `prompts/` | **Les prompts réutilisables** à donner à l'agent — un `.md` par type de mission (variables à remplacer + partie sous la ligne ✂ CUT) | — |
+| `AGENT_PROMPT.md` | Index des prompts + mode d'emploi | — |
+| `.github/workflows/` | **Jobs d'upscale Real-ESRGAN** : batch quotidien 08:00 Maroc + job manuel image unique (réveil auto de l'API Render, logs heartbeat, sortie JPEG prête à vendre) | **GitHub Actions** |
 | `scripts/upscale/` | Scripts Python partagés des jobs (API client, Cloudinary, Real-ESRGAN) | — |
-| `scripts/gen-prompt-template.py` | Régénère le fallback bundlé de la page « Agent prompt » (`web/src/lib/agent-prompt-template.ts`) depuis `AGENT_PROMPT.md` — à lancer après chaque édition du prompt | — |
+| `scripts/gen-prompt-template.py` | Régénère les fallbacks bundlés de la page « Agent prompts » (`web/src/lib/prompt-templates/`) depuis `prompts/*.md` — à lancer après chaque édition d'un prompt | — |
 
 ## Déploiement
 
@@ -58,7 +83,9 @@ Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de p
 2. Database Access : un utilisateur + mot de passe.
 3. Network Access : `0.0.0.0/0` (Render n'a pas d'IP fixe en free tier).
 4. Récupère l'URI : `mongodb+srv://<user>:<pass>@<cluster>/?retryWrites=true&w=majority`
-   (lien seul — le nom de la base se règle à part via `MONGO_DB_NAME`, défaut `adobe-stock`).
+   (lien seul — le nom de la base se règle à part via `MONGO_DB_NAME`, défaut `adobe-stock`
+   *conservé pour ne pas perdre les données existantes* ; mets `stock-room` pour repartir
+   d'une base neuve).
 
 ### 2. API — Render
 
@@ -90,14 +117,15 @@ Après déploiement : `https://<service>.onrender.com/` affiche la page de docs 
 
 ### 4. Utilisation
 
-Copie `AGENT_PROMPT.md`, remplace les `[VARIABLES]` (nombre d'images, liens des 2 APIs, les 2
-clés, liens des repos), et envoie-le à ton agent. Il fait tout : recherche des règles Adobe Stock
-actuelles + de la demande → **anti-doublons (`GET /api/images/all` — il vérifie la librairie
-existante avant de générer)** → prompts (Lyra) → génération → **contrôle visuel (HARD RULES)** →
-session → enregistrement → rapport. La webapp te permet ensuite de
-parcourir, trier, filtrer, copier les métadonnées (titre / catégorie / keywords), télécharger
-les images, marquer ce qui a été uploadé sur Adobe Stock (tampon vert), et **générer le CSV
-d'upload Adobe Stock** pour un lot sélectionné.
+Choisis le prompt de ta mission dans `prompts/` (ou la page **Agent prompts** de la webapp —
+elle pré-remplit les variables de connexion). Remplace la variable spécifique
+(nombre d'images, mission, thème du book…) et envoie-le à ton agent. Il fait tout :
+recherche des règles de la plateforme cible + de la demande → **anti-doublons
+(`GET /api/images/all` — il vérifie la librairie existante avant de générer)** → prompts →
+génération via Zazo Image Studio → **contrôle visuel** → session → enregistrement → rapport.
+La webapp te permet ensuite de parcourir, trier, filtrer, copier les métadonnées, télécharger
+les images, marquer ce qui a été uploadé sur la plateforme cible (tampon vert), et **générer
+le CSV d'upload Adobe Stock** pour un lot sélectionné.
 
 ### 5. Upscales — Real-ESRGAN via GitHub Actions
 
@@ -147,7 +175,11 @@ exportées réutilisent les métadonnées de leur image d'origine.
 
 ➡️ **Détails + table des catégories : [`docs/CSV_EXPORT.md`](docs/CSV_EXPORT.md)**
 
-## Règles métier absolues
+## Règles métier absolues — mission Adobe Stock
+
+Ces règles ne s'appliquent **qu'au prompt Adobe Stock** (chaque prompt porte ses propres
+règles — le coloring book Etsy, par exemple, exige des animaux mignons, donc PAS de règle
+« aucun être vivant »).
 
 **1 — Aucun être vivant dans les images générées** (ni humains, ni animaux — silhouettes,
 illustrations et ombres incluses ; plantes/fleurs autorisées).
@@ -166,7 +198,7 @@ les règles : à chaque run, il **cherche sur le web les règles officielles act
 applique par-dessus les HARD RULES. Recherche impossible → comportement conservateur +
 signalement dans le rapport.
 
-Ces règles sont inscrites en dur dans `AGENT_PROMPT.md` (HARD RULES n°1–3), complétées par
+Ces règles sont inscrites en dur dans `prompts/adobe-stock.md` (HARD RULES n°1–3), complétées par
 un **contrôle visuel obligatoire de chaque image générée avant enregistrement** (STEP 4) —
 toute image non conforme n'est pas sauvegardée, pas comptée, et remplacée.
 
@@ -192,7 +224,7 @@ cd api && npm test
   sans variable configurée, personne n'entre.
 - Rate limiting : général (300/min), `/auth/verify` strict (20/5 min), garde anti-brute-force
   (30 échecs/5 min → blocage 10 min).
-- Validation zod systématique (catégorie parmi les 21 Adobe, keywords 3–50, URL http(s)…).
+- Validation zod systématique (catégorie parmi les 21, keywords 3–50, URL http(s)…).
 - Pagination, tri et filtres **imposés côté serveur** (limit ∈ 5/10/20/50/100, sort whitelist).
 - Supprimer une session supprime ses images (cascade), mots de passe jamais stockés côté client
   au-delà du `sessionStorage` (onglet).
@@ -207,7 +239,7 @@ cd api && npm test
   Cloudinary (`result.cloudinaryUrl`, URL permanente). Si Cloudinary n'est pas/plus configuré
   sur ce service, l'agent stocke l'URL serveur (`/files/…?apiKey=…`) qui est **éphémère**
   (redémarrages / spin-down du free tier Render). Pour un usage intensif : configure Cloudinary
-  sur zazogptimage2api et vérifie dans ses logs Render l'absence de `cloudinary upload failed`.
+  sur Zazo Image Studio et vérifie dans ses logs Render l'absence de `cloudinary upload failed`.
 - Quota journalier easemate (code `6101`) : l'API de génération retry avec rotation d'IP Tor ;
   si toutes les tentatives échouent, attends quelques heures (reset quotidien).
 - La webapp n'édite **pas** les sessions (par design : seul le champ *Images* est modifiable —
@@ -219,5 +251,5 @@ API : Node 18+, Express 4, Mongoose 8, zod 3, express-rate-limit 7, helmet 8, cl
 (destroy optionnel).
 WebApp : Next.js 16 (App Router), TypeScript, Tailwind CSS 4, shadcn/ui, Radix, lucide-react.
 Upscales : GitHub Actions + Python (PyTorch CPU, Real-ESRGAN, cloudinary-py).
-Design : « Stockroom » — papier/encre/orange sécurité, Barlow Semi Condensed + Barlow + IBM
-Plex Mono, signature = tampon « USED · ADOBE STOCK ».
+Design : « Stock Room » — papier/encre/orange sécurité, Barlow Semi Condensed + Barlow + IBM
+Plex Mono, signature = tampon « USED » + plaque « SR » inclinée (aussi favicon/apple-icon).

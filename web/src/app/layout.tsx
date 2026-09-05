@@ -25,9 +25,9 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Stockroom — Adobe Stock Images Generator",
+  title: "Stock Room — AI image asset dispatch",
   description:
-    "Dispatch desk for AI-generated Adobe Stock assets: browse generation sessions, review image metadata, mark what has been uploaded.",
+    "Mission-agnostic asset manager for AI-generated images: one Session per mission (Adobe Stock, Etsy, Redbubble, Instagram, ads…), every generated image registered with its metadata.",
   robots: { index: false, follow: false },
 };
 

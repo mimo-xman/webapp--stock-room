@@ -68,7 +68,7 @@ export function SessionFormDialog({ open, onOpenChange, onSaved }: SessionFormDi
         <DialogHeader className="border-b border-line p-4">
           <DialogTitle className="font-display text-lg font-bold uppercase tracking-wide">New session</DialogTitle>
           <DialogDescription className="text-sm text-ink-muted">
-            A session groups one agent production run. Its title must be unique.
+            A session groups one mission (an agent production run). Its title must be unique.
           </DialogDescription>
         </DialogHeader>
 
@@ -84,7 +84,7 @@ export function SessionFormDialog({ open, onOpenChange, onSaved }: SessionFormDi
             }}
             onKeyDown={(e) => e.key === "Enter" && save()}
             className="h-9 rounded-none border-line-strong"
-            placeholder="Adobe Stock batch — ceramic still life — 2026-09-03"
+            placeholder="Mission — subject — 2026-09-03 (e.g. Etsy coloring book — ocean animals)"
             maxLength={120}
           />
           {error && (

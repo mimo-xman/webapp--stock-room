@@ -50,7 +50,7 @@ module.exports = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Stockroom API — Adobe Stock Images Generator by agents</title>
+<title>Stock Room API — AI image asset dispatch</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Barlow:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -94,8 +94,9 @@ module.exports = `<!doctype html>
 <body>
 <div class="wrap">
   <span class="tag">Asset database API</span>
-  <h1>Stockroom API</h1>
-  <p class="sub">Persistence layer for <strong>Adobe Stock — Images Generator by agents</strong>.
+  <h1>Stock Room API</h1>
+  <p class="sub">Persistence layer for <strong>Stock Room</strong> — mission-agnostic asset
+  dispatch for AI-generated images (Adobe Stock, Etsy, Redbubble, Instagram, ads…).
   AI agents register generation sessions and image metadata here; the Next.js web app
   reads and manages the same data behind a password gate.</p>
 
@@ -163,7 +164,7 @@ from / to ISO dates on createdAt</pre>
     <p style="margin-top:8px"><span class="stamp">Stockroom · dispatch desk</span></p>
   </div>
 
-  <footer>Source: github.com/mimo-xman/adobe-stock-images-generator-by-agents — API lives in <code>api/</code>, web app in <code>web/</code>, the reusable agent prompt in <code>AGENT_PROMPT.md</code>.</footer>
+  <footer>Source: github.com/mimo-xman/adobe-stock-images-generator-by-agents — API lives in <code>api/</code>, web app in <code>web/</code>, the reusable agent prompts in <code>prompts/</code> (indexed by AGENT_PROMPT.md).</footer>
 </div>
 </body>
 </html>`;

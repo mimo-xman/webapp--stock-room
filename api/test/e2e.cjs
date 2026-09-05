@@ -93,7 +93,7 @@ async function main() {
     ok('GET /ready → 200', r.status === 200);
 
     r = await call('GET', '/');
-    ok('GET / → HTML docs', r.status === 200 && /<html/i.test(r.text) && /Stockroom API/.test(r.text));
+    ok('GET / → HTML docs', r.status === 200 && /<html/i.test(r.text) && /Stock Room API/.test(r.text));
 
     r = await call('GET', '/nope');
     ok('unknown route → 404 JSON', r.status === 404 && r.json.error.code === 'NOT_FOUND');

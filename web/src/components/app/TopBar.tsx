@@ -14,7 +14,7 @@ export function TopBar() {
   const links = [
     { href: "/sessions", label: "Sessions", icon: Boxes },
     { href: "/images", label: "Images", icon: Images },
-    { href: "/prompt", label: "Agent prompt", icon: Wand2 },
+    { href: "/prompt", label: "Agent prompts", icon: Wand2 },
   ];
 
   function lock() {
@@ -26,11 +26,11 @@ export function TopBar() {
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-paper/95 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 sm:px-6">
-        <Link href="/sessions" className="group flex items-center gap-2.5" aria-label="Stockroom home">
+        <Link href="/sessions" className="group flex items-center gap-2.5" aria-label="Stock Room home">
           <span className="flex h-7 w-7 -rotate-3 items-center justify-center bg-brand font-display text-[13px] font-bold text-white shadow-[var(--shadow-hard-sm)] transition-transform group-hover:rotate-0">
             SR
           </span>
-          <span className="font-display text-lg font-bold uppercase tracking-tight">Stockroom</span>
+          <span className="font-display text-lg font-bold uppercase tracking-tight">Stock Room</span>
         </Link>
 
         <nav className="flex items-center gap-1" aria-label="Main">
@@ -57,7 +57,7 @@ export function TopBar() {
 
         <div className="ml-auto flex items-center gap-3">
           <span className="hidden font-mono text-[11px] uppercase tracking-wider text-ink-muted md:block">
-            adobe stock · asset dispatch
+            AI asset dispatch
           </span>
           <button
             type="button"

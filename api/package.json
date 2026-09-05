@@ -1,8 +1,8 @@
 {
-  "name": "adobe-stock-images-generator-api",
+  "name": "stock-room-api",
   "version": "1.0.0",
   "private": true,
-  "description": "Asset database API for 'Adobe Stock - Images Generator by agents' — stores generation Sessions and Images metadata for the Adobe Stock upload pipeline.",
+  "description": "Stock Room — mission-agnostic asset database API: stores generation Sessions and Images for any AI image production mission (Adobe Stock, Etsy, Redbubble, Instagram, ads…).",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
