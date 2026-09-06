@@ -48,7 +48,7 @@ détaillé est dans [`AGENT_PROMPT.md`](AGENT_PROMPT.md)) :
 |---|---|---|
 | [`prompts/main.md`](prompts/main.md) | **Universel** — explique les deux APIs + la structure Session → Images ; tu décris la mission (n'importe quoi : visuels Instagram, scènes vidéo, pubs…) | `[MISSION BRIEF]` |
 | [`prompts/adobe-stock.md`](prompts/adobe-stock.md) | Batch **Adobe Stock** — règles dures (aucun être vivant, aucun visage/partie du corps), recherche live des règles, métadonnées prêtes à l'upload | `[NUMBER OF PROMPTS TO CREATE]` |
-| [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Coloring book Etsy** — pages line-art pour enfants + couverture, règles Etsy recherchées live, print-ready | `[BOOK THEME]`, `[NUMBER OF COLORING PAGES]` |
+| [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Coloring book Etsy** — pages line-art pour enfants + couverture, print-ready ; l'agent **recherche lui-même le thème tendance le plus demandé** sur Etsy (pas de variable thème — il décide et justifie) | `[NUMBER OF COLORING PAGES]` |
 
 La webapp (page **Agent prompts**) remplie, valide et exporte ces prompts — les six variables
 de connexion (les 2 URLs + 2 clés + 2 repos) sont partagées entre tous les prompts et

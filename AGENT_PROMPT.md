@@ -10,7 +10,7 @@ Each mission type has its own ready-to-send prompt in [`prompts/`](prompts/):
 |---|---|---|
 | [`prompts/main.md`](prompts/main.md) | **Any mission** — the universal prompt. Explains how to use the two APIs (Stock Room + Zazo Image Studio) and the Session → Images data structure; you fill in `[MISSION BRIEF]` with whatever you want produced. | `[MISSION BRIEF]` |
 | [`prompts/adobe-stock.md`](prompts/adobe-stock.md) | **Adobe Stock batch** — demand research, hard rules (no living beings, no faces/body parts), upload-ready metadata. | `[NUMBER OF PROMPTS TO CREATE]` |
-| [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Etsy coloring book** — children's line-art coloring pages + cover, Etsy rules researched live, print-ready. | `[BOOK THEME]`, `[NUMBER OF COLORING PAGES]` |
+| [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Etsy coloring book** — children's line-art coloring pages + cover, Etsy rules researched live, print-ready. The agent researches current Etsy demand and **picks the theme itself** (no theme variable — it decides and justifies with sources). | `[NUMBER OF COLORING PAGES]` |
 
 All three share the same six connection variables (the two API links + keys + backup repo
 links) and the same file layout: a variables table, a ✂ **CUT HERE** line, and the prompt

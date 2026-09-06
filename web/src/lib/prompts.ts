@@ -162,26 +162,17 @@ export const PROMPTS: PromptDefinition[] = [
   {
     id: "coloring-book-etsy",
     title: "Coloring book — Etsy",
-    tagline: "Children's line-art coloring pages + cover, print-ready, Etsy rules.",
+    tagline: "Children's line-art coloring pages + cover — the agent researches Etsy demand and picks the theme itself.",
     purpose: "etsy",
     icon: "book",
     file: "prompts/coloring-book-etsy.md",
     bundled: BUNDLED_TEMPLATE_COLORING_BOOK_ETSY,
     specificVars: [
       {
-        key: "bookTheme",
-        token: "[BOOK THEME]",
-        label: "Book theme",
-        help: "The theme/subject of the coloring book (e.g. Ocean animals).",
-        placeholder: "Ocean animals",
-        type: "text",
-        required: true,
-      },
-      {
         key: "numberOfPages",
         token: "[NUMBER OF COLORING PAGES]",
         label: "Number of coloring pages",
-        help: "How many coloring pages to produce (cover is extra, always 1).",
+        help: "How many coloring pages to produce (cover is extra, always 1). The theme is NOT typed here — the agent researches Etsy's current demand and picks it itself.",
         placeholder: "20",
         type: "number",
         required: true,
