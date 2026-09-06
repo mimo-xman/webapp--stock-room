@@ -139,7 +139,21 @@ un autre nom que `stock-room`, change-le aux **trois endroits** en même temps.
 3. Build configuration :
    - **Root directory : `web`**
    - **Build command : `npm run build`**
-   - **Deploy command : `npm run deploy`** (= `opennextjs-cloudflare build && opennextjs-cloudflare deploy`)
+   - **Deploy command : `npm run deploy`** (= `opennextjs-cloudflare build && wrangler deploy`)
+
+   ⚠️ **Écris-le exactement comme ça.** `npx run deploy` **n'existe pas** (`npx` exécute un
+   binaire, `run` est une sous-commande de `npm`) et fait échouer le déploiement avec
+   `npm error could not determine executable to run` — après un build pourtant réussi.
+   Deux réglages équivalents et sûrs, au choix :
+
+   | Réglage | Build command | Deploy command |
+   |---|---|---|
+   | **Recommandé** (un seul build) | `npx opennextjs-cloudflare build` | `npx wrangler deploy` *(valeur par défaut — laisse le champ vide)* |
+   | **Simple** | `npm run build` | `npm run deploy` *(refait un build OpenNext complet : ~30 s de plus)* |
+
+   Note : `npm run build` reste volontairement `next build` — l'adaptateur OpenNext
+   l'appelle en interne pendant `opennextjs-cloudflare build` ; ne le remplace jamais
+   par `opennextjs-cloudflare build` (récursion infinie).
 4. Variable d'environnement (Settings → Variables and Secrets, ou *Build → Variables*) :
 
    | Variable | Valeur |
