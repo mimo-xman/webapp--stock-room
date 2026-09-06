@@ -1,1 +1,8 @@
-"name": "stockroom"
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "stockroom",
+  "compatibility_date": "2026-09-03",
+  "observability": {
+    "enabled": true
+  }
+}
