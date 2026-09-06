@@ -1,0 +1,4 @@
+# Static asset caching — recommended by the OpenNext Cloudflare adapter
+# https://opennext.js.org/cloudflare/get-started (step 7)
+/_next/static/*
+  Cache-Control: public,max-age=31536000,immutable

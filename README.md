@@ -3,15 +3,16 @@
 **Stock Room** est le hub de dispatch des images générées par IA : un **agent IA** reçoit une
 mission (batch Adobe Stock, coloring book Etsy, visuels d'événement Instagram, scènes d'une
 vidéo, créations publicitaires…), génère les images via l'API
-[Zazo Image Studio](https://github.com/mimo-xman/nodejs--api-for-gpt-image-2),
+[Zazo Image Studio](https://github.com/mimo-xman/webapp--zazo-image-studio),
 et enregistre chaque asset (image + métadonnées) dans une base de données, **une Session par
 mission**. Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de passe.
 
 > Historique : le projet s'appelait *Adobe Stock — Images Generator by agents* car la
 > première mission était la production d'images pour Adobe Stock. Le nom a changé quand les
 > missions se sont multipliées (Etsy, Redbubble, Instagram, pubs, scènes vidéo…) : Stock Room
-> est **agnostique de la plateforme** — le dépôt GitHub garde son nom d'origine uniquement
-> pour ne pas casser les URLs.
+> est **agnostique de la plateforme**. Les repos GitHub sont renommés
+> (`webapp--stock-room` et `webapp--zazo-image-studio`) — les anciennes URLs redirigent
+> automatiquement.
 
 ```
 ┌─────────────┐   1. agent prompt (mission)    ┌──────────────┐
@@ -27,8 +28,8 @@ mission**. Le propriétaire gère ensuite le tout depuis une webapp protégée p
                                                   │ 4. lecture/édition
                                                   ▼
                                         ┌──────────────────┐
-                                        │  WebApp (Netlify)│  mot de passe (APP_PASSWORD)
-                                        │  Next.js 16      │  pagination/filtres backend
+                                        │ WebApp (Cloudflare│  mot de passe (APP_PASSWORD)
+                                        │ Workers + Netlify)│  pagination/filtres backend
                                         └──────────────────┘
 
                                         ┌─────────────────────────────────┐
@@ -68,7 +69,7 @@ sauvegardées une fois pour toutes dans le navigateur. Ajouter un 4ᵉ prompt = 
 | Chemin | Contenu | Hébergement |
 |---|---|---|
 | `api/` | API Node.js + Express + Mongoose (Sessions/Images, auth double, validation zod, rate limit, pagination/search/filter/sort backend, proxy download, cascade delete, **upscales** : endpoints + filtres + cap serveur, **`GET /api/images/all`** : toute la librairie en un appel pour l'anti-doublons de l'agent) | **Render** (runtime Node) |
-| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used », copy icons, modales custom, **navigation prev/next en boucle dans le détail**, **affichage des upscales**, **export CSV Adobe Stock**, **statut batch**, **page « Agent prompts »** : switcher multi-prompts + variables partagées + validation → prompt généré copiable/téléchargeable en .md, **favicon + apple-icon** « SR ») | **Netlify** |
+| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used », copy icons, modales custom, **navigation prev/next en boucle dans le détail**, **affichage des upscales**, **export CSV Adobe Stock**, **statut batch**, **page « Agent prompts »** : switcher multi-prompts + variables partagées + validation → prompt généré copiable/téléchargeable en .md, **jeu d'icônes complet** : `icon.svg` + `apple-icon.png` + `favicon.ico` « SR ») | **Cloudflare Workers** (ou Netlify) |
 | `prompts/` | **Les prompts réutilisables** à donner à l'agent — un `.md` par type de mission (variables à remplacer + partie sous la ligne ✂ CUT) | — |
 | `AGENT_PROMPT.md` | Index des prompts + mode d'emploi | — |
 | `.github/workflows/` | **Jobs d'upscale Real-ESRGAN** : batch quotidien 08:00 Maroc + job manuel image unique (réveil auto de l'API Render, logs heartbeat, sortie JPEG prête à vendre) | **GitHub Actions** |
@@ -101,19 +102,68 @@ Variables d'environnement à définir :
 | `MONGO_DB_NAME` | optionnel — nom de la base, **séparé** de l'URI (défaut : `adobe-stock`, ou la base de l'URI si présente) |
 | `API_KEY` | clé de l'agent — `openssl rand -hex 24` |
 | `APP_PASSWORD` | le mot de passe de la webapp |
-| `CORS_ORIGINS` | l'URL Netlify de la webapp (ex. `https://stockroom.netlify.app`) — ou `*` |
+| `CORS_ORIGINS` | l'URL de la webapp (ex. `https://stock-room.<ton-compte>.workers.dev` ou l'URL Netlify) — ou `*` |
 
 Après déploiement : `https://<service>.onrender.com/` affiche la page de docs de l'API.
 
-### 3. WebApp — Netlify
+### 3. WebApp — Cloudflare Workers (recommandé)
 
-1. *Add new site → Import an existing project → repo → Base directory `web`*
-   (Build command `npm run build`, plugin `@netlify/plugin-nextjs` déjà déclaré dans `web/netlify.toml`).
-2. Variable d'environnement (Site settings → Environment variables) :
+#### ⚠️ La règle d'or — les trois noms identiques
 
-| Variable | Valeur |
+La webapp tourne sur Workers via l'adaptateur officiel
+[@opennextjs/cloudflare](https://opennext.js.org/cloudflare/get-started). Ce Worker doit
+posséder un **service binding `WORKER_SELF_REFERENCE` vers lui-même** (déjà déclaré dans
+`web/wrangler.jsonc`), et Cloudflare exige que le nom référencé existe dans ton compte.
+Les **trois noms suivants doivent donc être strictement identiques** — c'est déjà le cas
+dans ce repo, il suffit de créer le Worker avec le bon nom :
+
+| Où | Nom |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | `https://<service-render>.onrender.com` |
+| `web/wrangler.jsonc` → `"name"` **et** `"services[0].service"` | `stock-room` |
+| `web/package.json` → `"name"` | `stock-room` |
+| Worker créé dans le dashboard Cloudflare | `stock-room` |
+
+Si un seul diffère, le déploiement échoue avec
+`Service binding 'WORKER_SELF_REFERENCE' references Worker '…' which was not found [code: 10143]`.
+C'est la cause exacte des erreurs de déploiement passées : sans section `services` dans le
+`wrangler.jsonc`, l'adaptateur OpenNext **génère le binding tout seul à partir du `name` du
+`package.json`** — qui ne matchait pas le nom du Worker réellement déployé. Le binding est
+maintenant **déclaré explicitement** dans le repo : le nom ne peut plus dériver. Si tu veux
+un autre nom que `stock-room`, change-le aux **trois endroits** en même temps.
+
+#### Étapes (dashboard Cloudflare)
+
+1. *Workers & Pages → Create → Workers → Import a repository* — **nomme le Worker
+   exactement `stock-room`** (les Workers ne peuvent pas être renommés ensuite).
+2. Repo : ce dépôt, production branch `main`.
+3. Build configuration :
+   - **Root directory : `web`**
+   - **Build command : `npm run build`**
+   - **Deploy command : `npm run deploy`** (= `opennextjs-cloudflare build && opennextjs-cloudflare deploy`)
+4. Variable d'environnement (Settings → Variables and Secrets, ou *Build → Variables*) :
+
+   | Variable | Valeur |
+   |---|---|
+   | `NEXT_PUBLIC_API_URL` | `https://<service-render>.onrender.com` |
+
+   (inlinée à la compilation : un `NEXT_PUBLIC_*` est figé au build, changer la variable
+   nécessite un **re-déploiement**, pas juste un redémarrage)
+5. *Save and deploy*.
+
+Les fichiers de déploiement **requis** (tous présents) : `web/wrangler.jsonc` (nom +
+main `.open-next/worker.js` + assets + binding), `web/open-next.config.ts` (adaptateur),
+`web/public/_headers` (cache statique). Sans eux le build échoue (10143 / « Missing
+entry-point » / « No open-next.config.ts file was found ») ; `@opennextjs/cloudflare` et
+`wrangler` sont en devDependencies et le lock est synchronisé.
+
+Depuis un terminal : `cd web && npm run deploy` (après `npx wrangler login`).
+`npm run preview` sert l'app dans le runtime workerd local.
+
+#### Alternative : Netlify
+
+`web/netlify.toml` reste supporté : *Add new site → Import project → Base directory `web`*,
+variable `NEXT_PUBLIC_API_URL` comme ci-dessus. Les deux cibles cohabitent — déploie sur
+l'une ou l'autre (ou les deux), la webapp est identique.
 
 ### 4. Utilisation
 
@@ -252,4 +302,5 @@ API : Node 18+, Express 4, Mongoose 8, zod 3, express-rate-limit 7, helmet 8, cl
 WebApp : Next.js 16 (App Router), TypeScript, Tailwind CSS 4, shadcn/ui, Radix, lucide-react.
 Upscales : GitHub Actions + Python (PyTorch CPU, Real-ESRGAN, cloudinary-py).
 Design : « Stock Room » — papier/encre/orange sécurité, Barlow Semi Condensed + Barlow + IBM
-Plex Mono, signature = tampon « USED » + plaque « SR » inclinée (aussi favicon/apple-icon).
+Plex Mono, signature = tampon « USED » + plaque « SR » inclinée (aussi icon.svg +
+apple-icon.png + favicon.ico, régénérables via `scripts/gen-app-icons.py`).

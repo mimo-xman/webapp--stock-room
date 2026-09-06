@@ -18,7 +18,7 @@ import { BUNDLED_TEMPLATE_ADOBE_STOCK } from "./prompt-templates/adobe-stock";
 import { BUNDLED_TEMPLATE_COLORING_BOOK_ETSY } from "./prompt-templates/coloring-book-etsy";
 
 export const TEMPLATE_SOURCE_BASE =
-  "https://raw.githubusercontent.com/mimo-xman/adobe-stock-images-generator-by-agents/main/prompts";
+  "https://raw.githubusercontent.com/mimo-xman/webapp--stock-room/main/prompts";
 
 /** The line in a prompt file that separates the owner notes from the prompt. */
 const CUT_MARKER = "CUT HERE";
@@ -100,7 +100,7 @@ export const SHARED_VARS: PromptVar[] = [
     token: "[ZAZO IMAGE STUDIO REPO LINK]",
     label: "Zazo Image Studio — backup repo link",
     help: "Given to the agent when the APIs misbehave (clone + read README).",
-    placeholder: "https://github.com/mimo-xman/nodejs--api-for-gpt-image-2",
+    placeholder: "https://github.com/mimo-xman/webapp--zazo-image-studio",
     type: "url",
     required: true,
   },
@@ -109,7 +109,7 @@ export const SHARED_VARS: PromptVar[] = [
     token: "[STOCK ROOM REPO LINK]",
     label: "Stock Room — backup repo link",
     help: "Given to the agent when the APIs misbehave (clone + read README).",
-    placeholder: "https://github.com/mimo-xman/adobe-stock-images-generator-by-agents",
+    placeholder: "https://github.com/mimo-xman/webapp--stock-room",
     type: "url",
     required: true,
   },

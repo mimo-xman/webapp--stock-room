@@ -17,8 +17,8 @@
 | `[ZAZO IMAGE STUDIO API KEY]` | Its API key (header `X-API-Key`) | `ZL5a…` |
 | `[STOCK ROOM API LINK]` | Base URL of the Stock Room (asset database) API | `https://stock-room-api.onrender.com` |
 | `[STOCK ROOM API KEY]` | Its API key (header `X-API-Key`) | `9f2b…` |
-| `[ZAZO IMAGE STUDIO REPO LINK]` | Backup: source repo of the image API | `https://github.com/mimo-xman/nodejs--api-for-gpt-image-2` |
-| `[STOCK ROOM REPO LINK]` | Backup: source repo of the database API | `https://github.com/mimo-xman/adobe-stock-images-generator-by-agents` |
+| `[ZAZO IMAGE STUDIO REPO LINK]` | Backup: source repo of the image API | `https://github.com/mimo-xman/webapp--zazo-image-studio` |
+| `[STOCK ROOM REPO LINK]` | Backup: source repo of the database API | `https://github.com/mimo-xman/webapp--stock-room` |
 
 ✂ — — — — — — — — — — — — — — — — — — CUT HERE — — — — — — — — — — — — — — — — —
 

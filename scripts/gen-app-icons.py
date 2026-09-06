@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Generate web/src/app/apple-icon.png (180x180) for the Stock Room webapp.
+"""Generate the Stock Room webapp icon set from the brand tokens.
 
-Full-bleed brand-orange tile, white SR monogram rotated -4deg (same identity
-as src/app/icon.svg). Run from the repo root:
+Outputs (run from the repo root):
+    web/src/app/apple-icon.png   180x180  (iOS / apple touch icon)
+    web/src/app/favicon.ico      16+32+48 (legacy browser favicon)
+
+Identity (same as src/app/icon.svg and the TopBar plate): paper background,
+brand-orange plate rotated -4deg with a hard ink shadow, white SR monogram.
 
     python3 scripts/gen-app-icons.py
 """
@@ -10,12 +14,18 @@ as src/app/icon.svg). Run from the repo root:
 from PIL import Image, ImageDraw, ImageFont
 
 SIZE = 180
-OUT = "web/src/app/apple-icon.png"
+OUT_PNG = "web/src/app/apple-icon.png"
+OUT_ICO = "web/src/app/favicon.ico"
 
 BRAND = (232, 80, 10, 255)      # #e8500a
 INK = (23, 24, 28, 255)         # #17181c
 WHITE = (255, 255, 255, 255)
 PAPER = (243, 242, 237, 255)    # #f3f2ed
+
+BG_RADIUS = 40                  # rounded paper corners
+PLATE = 96                      # brand plate size
+PLATE_OFFSET = 7                # hard ink shadow offset (down-right)
+ROT = -4                        # signature tilt (same as TopBar plate)
 
 FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -32,33 +42,51 @@ def load_font(size: int) -> ImageFont.FreeTypeFont:
     raise SystemExit("fatal: no bold sans font found")
 
 
-def main() -> None:
-    img = Image.new("RGBA", (SIZE, SIZE), BRAND)
+def build_icon(size: int) -> Image.Image:
+    """Render the icon at `size` px (supersample at 180 then downscale)."""
+    s = SIZE  # draw at 180 then resize
+    scale_bg = max(2, round(BG_RADIUS * size / s)) if size < 64 else BG_RADIUS
+
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
+    # paper background, rounded corners
+    draw.rounded_rectangle([0, 0, s - 1, s - 1], radius=BG_RADIUS, fill=PAPER)
 
-    # subtle ink shadow band at the bottom-right edge (the hard-shadow signature)
-    band = 8
-    draw.rectangle([SIZE - band, 0, SIZE, SIZE], fill=INK)
-    draw.rectangle([0, SIZE - band, SIZE, SIZE], fill=INK)
-
-    # SR monogram on its own layer, rotated like the TopBar plate
-    font = load_font(92)
-    text = "SR"
-    bbox = draw.textbbox((0, 0), text, font=font)
+    # plate layer: ink shadow + brand plate, rotated, with the SR monogram
+    font = load_font(50)
+    bbox = draw.textbbox((0, 0), "SR", font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    pad = 40
-    layer = Image.new("RGBA", (tw + pad * 2, th + pad * 2), (0, 0, 0, 0))
+
+    layer = Image.new("RGBA", (PLATE + 40, PLATE + 40), (0, 0, 0, 0))
     ldraw = ImageDraw.Draw(layer)
-    ldraw.text((pad - bbox[0], pad - bbox[1]), text, font=font, fill=WHITE)
+    cx = (layer.width - PLATE) // 2
+    cy = (layer.height - PLATE) // 2
+    # hard ink shadow (offset), then the brand plate on top
+    ldraw.rectangle([cx + PLATE_OFFSET, cy + PLATE_OFFSET,
+                     cx + PLATE - 1 + PLATE_OFFSET, cy + PLATE - 1 + PLATE_OFFSET], fill=INK)
+    ldraw.rectangle([cx, cy, cx + PLATE - 1, cy + PLATE - 1], fill=BRAND)
+    # white SR monogram, centered on the plate
+    ldraw.text((cx + (PLATE - tw) // 2 - bbox[0],
+                cy + (PLATE - th) // 2 - bbox[1]), "SR", font=font, fill=WHITE)
 
-    mono = layer.rotate(4, resample=Image.BICUBIC, expand=True)
+    plate = layer.rotate(ROT, resample=Image.BICUBIC, expand=True)
+    img.alpha_composite(plate, ((s - plate.width) // 2, (s - plate.height) // 2))
 
-    x = (SIZE - mono.width) // 2
-    y = (SIZE - mono.height) // 2
-    img.alpha_composite(mono, (x, y))
+    if size != s:
+        img = img.resize((size, size), Image.LANCZOS)
+        _ = scale_bg  # (radius already scaled by the resize)
+    return img
 
-    img.convert("RGB").save(OUT, "PNG")
-    print(f"OK — {OUT} ({SIZE}x{SIZE})")
+
+def main() -> None:
+    icon = build_icon(SIZE)
+    icon.convert("RGB").save(OUT_PNG, "PNG")
+    print(f"OK — {OUT_PNG} ({SIZE}x{SIZE})")
+
+    ico_sizes = [(48, 48), (32, 32), (16, 16)]
+    frames = [build_icon(d) for d, _ in ico_sizes]
+    frames[0].save(OUT_ICO, format="ICO", sizes=ico_sizes, append_images=frames[1:])
+    print(f"OK — {OUT_ICO} ({[d for d, _ in ico_sizes]})")
 
 
 if __name__ == "__main__":

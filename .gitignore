@@ -30,3 +30,9 @@ coverage/
 db/
 *.db
 __pycache__/
+
+# Cloudflare / OpenNext (Workers deploys)
+web/.open-next/
+web/.wrangler/
+web/.dev.vars
+web/cloudflare-env.d.ts

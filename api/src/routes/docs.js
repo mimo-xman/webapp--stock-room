@@ -164,7 +164,7 @@ from / to ISO dates on createdAt</pre>
     <p style="margin-top:8px"><span class="stamp">Stockroom · dispatch desk</span></p>
   </div>
 
-  <footer>Source: github.com/mimo-xman/adobe-stock-images-generator-by-agents — API lives in <code>api/</code>, web app in <code>web/</code>, the reusable agent prompts in <code>prompts/</code> (indexed by AGENT_PROMPT.md).</footer>
+  <footer>Source: github.com/mimo-xman/webapp--stock-room — API lives in <code>api/</code>, web app in <code>web/</code>, the reusable agent prompts in <code>prompts/</code> (indexed by AGENT_PROMPT.md).</footer>
 </div>
 </body>
 </html>`;
