@@ -44,6 +44,8 @@ export interface StockImage {
   title: string;
   category: string;
   keywords: string[];
+  /** Generic "used/published" flag (image already consumed on its destination
+   *  platform). Historical wire name kept for API compatibility. */
   used_in_adobe_stock: boolean;
   /** Batch-worker coordination (parallel upscale workflow). Absent on
    *  images created before the feature — treat absent as active/not-in-use. */

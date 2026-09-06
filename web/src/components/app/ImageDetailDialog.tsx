@@ -2,7 +2,7 @@
 
 /**
  * Image detail dialog — large preview with Original/upscaled variant switch,
- * all Adobe Stock metadata with quick copy icons, download, stamp toggle,
+ * all the image metadata with quick copy icons, download, stamp toggle,
  * edit, delete. Upscaled variants (Real-ESRGAN via GitHub Actions) are
  * listed in the metadata column with per-variant mark-used / download /
  * delete actions. Optional looping prev/next navigation (arrows + ←/→ keys)
@@ -268,7 +268,7 @@ export function ImageDetailDialog({
               )}
               {stampVisible && (
                 <span className="stamp stamp-thunk pointer-events-none absolute" data-testid="detail-stamp">
-                  Used · Adobe Stock
+                  Used · published
                 </span>
               )}
 
@@ -483,8 +483,8 @@ export function ImageDetailDialog({
                             type="button"
                             role="checkbox"
                             aria-checked={selection?.isSelected(image._id, u._id) ?? false}
-                            aria-label={`Add the ×${u.scale} variant to the Adobe Stock CSV`}
-                            title="Add to the Adobe Stock CSV selection"
+                            aria-label={`Add the ×${u.scale} variant to the CSV export`}
+                            title="Add to the CSV export selection"
                             disabled={!selection}
                             onClick={() => selection?.toggle(image, u)}
                             className={cn(
@@ -539,7 +539,7 @@ export function ImageDetailDialog({
                             small
                             onToggle={() => toggleUpscaleUsed(u)}
                             className="ml-auto"
-                            label={`Mark the ×${u.scale} variant as used in Adobe Stock`}
+                            label={`Mark the ×${u.scale} variant as used`}
                           />
                           <button
                             type="button"
@@ -581,8 +581,8 @@ export function ImageDetailDialog({
                   type="button"
                   role="checkbox"
                   aria-checked={selection.isSelected(image._id, "original")}
-                  aria-label="Add the original image to the Adobe Stock CSV"
-                  title="Add the ORIGINAL image to the Adobe Stock CSV selection"
+                  aria-label="Add the original image to the CSV export"
+                  title="Add the ORIGINAL image to the CSV export selection"
                   onClick={() => selection.toggle(image)}
                   className={cn(
                     "flex h-[34px] items-center gap-1.5 border px-3 font-display text-xs font-semibold uppercase tracking-widest transition-colors focus-visible:outline-2 focus-visible:outline-brand",

@@ -83,7 +83,7 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected 
 
         {image.used_in_adobe_stock && (
           <span key={thunkKey} className="stamp stamp-thunk pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[11px] sm:text-xs">
-            Used · Adobe Stock
+            Used · published
           </span>
         )}
 
@@ -96,8 +96,8 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected 
             type="button"
             role="checkbox"
             aria-checked={selected}
-            aria-label={`Select ${image.title} for the Adobe Stock CSV`}
-            title="Select for the Adobe Stock CSV"
+            aria-label={`Select ${image.title} for the CSV export`}
+            title="Select for the CSV export"
             onClick={(e) => {
               e.stopPropagation();
               onToggleSelect(image);

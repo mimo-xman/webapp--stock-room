@@ -107,7 +107,7 @@ export default function SessionDetailPage() {
     }
   }
 
-  /** Build + download the Adobe Stock metadata CSV for the selection
+  /** Build + download the metadata CSV for the selection
    *  (originals and/or upscaled variants — selection survives pagination). */
   function downloadCsv() {
     setCsvBuilding(true);
@@ -115,10 +115,10 @@ export default function SessionDetailPage() {
       const { csv, rows, warnings } = buildAdobeStockCsv(csvSel.list);
       downloadCsvFile(csv, `adobe-stock-upload-${new Date().toISOString().slice(0, 10)}.csv`);
       toast({
-        title: "Adobe Stock CSV downloaded",
+        title: "CSV downloaded",
         description: warnings.length
           ? `${rows} row(s). ⚠ ${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}`
-          : `${rows} row(s) — upload the images to Adobe Stock, then this CSV.`,
+          : `${rows} row(s) — upload the images first, then this CSV.`,
       });
     } finally {
       setCsvBuilding(false);
@@ -171,7 +171,7 @@ export default function SessionDetailPage() {
             </h1>
             <p className="mt-1 font-mono text-xs text-ink-muted">
               {session
-                ? `created ${formatDateTime(session.createdAt)} · ${session.imagesCount} images · ${session.usedCount ?? 0} used in Adobe Stock`
+                ? `created ${formatDateTime(session.createdAt)} · ${session.imagesCount} images · ${session.usedCount ?? 0} used`
                 : "…"}
             </p>
           </div>

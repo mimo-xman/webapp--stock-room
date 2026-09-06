@@ -52,12 +52,15 @@ export const SESSION_SORTS = [
   { value: "imagesCount", label: "Images" },
 ] as const;
 
+// Sort keys mirror the API's `sort` values — `used_in_adobe_stock` is the
+// historical wire name of the generic "used" flag (Stock Room is
+// platform-agnostic; the webapp only ever shows "Used").
 export const IMAGE_SORTS = [
   { value: "createdAt", label: "Created" },
   { value: "updatedAt", label: "Updated" },
   { value: "title", label: "Title" },
   { value: "category", label: "Category" },
-  { value: "used_in_adobe_stock", label: "Adobe Stock" },
+  { value: "used_in_adobe_stock", label: "Used" },
   { value: "quality", label: "Quality" },
   { value: "ratio", label: "Ratio" },
   { value: "prompt", label: "Prompt" },

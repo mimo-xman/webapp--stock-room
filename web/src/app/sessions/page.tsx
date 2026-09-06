@@ -129,7 +129,7 @@ export default function SessionsPage() {
                 <div className="flex items-center gap-2">
                   <span
                     className="flex items-center gap-1.5 border border-line-strong px-2 py-1 font-mono text-[11px] text-ink"
-                    title={`${s.usedCount ?? 0} marked as used in Adobe Stock`}
+                    title={`${s.usedCount ?? 0} marked as used`}
                   >
                     {s.imagesCount} img
                     <span className="text-stamp">· {s.usedCount ?? 0} used</span>

@@ -114,11 +114,11 @@ export function ImageFormDialog({
     const e: Record<string, string> = {};
     if (!form.session_id) e.session_id = "Choose a session";
     if (form.title.trim().length < 3) e.title = "At least 3 characters";
-    if (form.title.trim().length > 200) e.title = "At most 200 characters (Adobe Stock limit)";
-    if (!form.category) e.category = "Choose one of the 21 Adobe Stock categories";
+    if (form.title.trim().length > 200) e.title = "At most 200 characters (API limit)";
+    if (!form.category) e.category = "Choose one of the 21 Stock Room categories";
     const kw = parseKeywords(form.keywords);
     if (kw.length < 3) e.keywords = "At least 3 keywords (comma separated)";
-    if (kw.length > 50) e.keywords = "At most 50 keywords (Adobe Stock limit)";
+    if (kw.length > 50) e.keywords = "At most 50 keywords (API limit)";
     if (!form.prompt.trim()) e.prompt = "The generation prompt is required";
     if (!editing) {
       if (!/^https?:\/\/.+/.test(form.image_link.trim())) e.image_link = 'Must be an http(s) URL like "https://…/image.png"';
@@ -195,7 +195,7 @@ export function ImageFormDialog({
           <DialogDescription className="text-sm text-ink-muted">
             {editing
               ? "Fix metadata or move the image to another session."
-              : "Register a generated image with its Adobe Stock upload info."}
+              : "Register a generated image with its upload info."}
           </DialogDescription>
         </DialogHeader>
 
@@ -323,7 +323,7 @@ export function ImageFormDialog({
               checked={form.used_in_adobe_stock}
               onCheckedChange={(c) => set("used_in_adobe_stock", c === true)}
             />
-            <span className="text-sm">Used in Adobe Stock (uploaded)</span>
+            <span className="text-sm">Used — already published / consumed somewhere</span>
           </label>
         </div>
 

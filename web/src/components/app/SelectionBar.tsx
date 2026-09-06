@@ -2,7 +2,7 @@
 
 /**
  * Sticky bottom bar shown while at least one asset (original or upscale
- * variant) is selected for the Adobe Stock CSV export. See docs/CSV_EXPORT.md.
+ * variant) is selected for the CSV export. See docs/CSV_EXPORT.md.
  */
 
 import { CheckSquare, FileDown, X } from "lucide-react";
@@ -26,7 +26,7 @@ export function SelectionBar({ count, disabled = false, onDownload, onClear }: S
     >
       <span className="flex items-center gap-2 font-mono text-xs uppercase tracking-wider text-ink">
         <CheckSquare className="h-4 w-4 text-brand" aria-hidden />
-        {count} selected for Adobe Stock CSV
+        {count} selected for CSV export
       </span>
       <span className="hidden font-mono text-[10.5px] text-ink-muted sm:inline">
         (selection is kept when you change pages)
@@ -46,7 +46,7 @@ export function SelectionBar({ count, disabled = false, onDownload, onClear }: S
           onClick={onDownload}
           disabled={disabled}
           className="flex h-9 items-center gap-2 bg-brand px-4 font-display text-xs font-bold uppercase tracking-widest text-white shadow-[var(--shadow-hard-sm)] transition-colors hover:bg-brand-deep disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-brand"
-          aria-label="Download the Adobe Stock CSV file"
+          aria-label="Download the CSV file"
           data-testid="download-csv"
         >
           <FileDown className="h-4 w-4" aria-hidden />

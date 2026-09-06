@@ -53,7 +53,7 @@ export default function ImagesPage() {
     },
     {
       key: "used_in_adobe_stock",
-      label: "Adobe Stock",
+      label: "Usage",
       options: [
         { value: "true", label: "Used" },
         { value: "false", label: "Not used" },
@@ -113,7 +113,7 @@ export default function ImagesPage() {
     }
   }
 
-  /** Build + download the Adobe Stock metadata CSV for the selection
+  /** Build + download the metadata CSV for the selection
    *  (originals and/or upscaled variants — selection survives pagination). */
   function downloadCsv() {
     setCsvBuilding(true);
@@ -121,10 +121,10 @@ export default function ImagesPage() {
       const { csv, rows, warnings } = buildAdobeStockCsv(csvSel.list);
       downloadCsvFile(csv, `adobe-stock-upload-${new Date().toISOString().slice(0, 10)}.csv`);
       toast({
-        title: "Adobe Stock CSV downloaded",
+        title: "CSV downloaded",
         description: warnings.length
           ? `${rows} row(s). ⚠ ${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}`
-          : `${rows} row(s) — upload the images to Adobe Stock, then this CSV.`,
+          : `${rows} row(s) — upload the images first, then this CSV.`,
       });
     } finally {
       setCsvBuilding(false);

@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Selection state for the Adobe Stock CSV export.
+ * Selection state for the CSV export (Adobe Stock contributor format —
+ * see docs/CSV_EXPORT.md).
  *
  * The Map lives in the PAGE component (mounted once per route), so the
  * selection SURVIVES pagination, filtering and sorting — all of those only
