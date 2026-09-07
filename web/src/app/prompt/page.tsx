@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Agent prompts generator — pick a mission prompt (main / Adobe Stock /
+ * Agent prompts generator — pick a mission prompt (main / stock platforms /
  * coloring book…), fill the shared connection variables once, add the
  * mission-specific variable, validate, then copy or download the
  * ready-to-send prompt as a .md file.

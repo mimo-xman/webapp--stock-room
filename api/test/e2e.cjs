@@ -497,7 +497,7 @@ async function main() {
 
     // ── parallel batch workers: claim / release ─────────────────────────────
     console.log('─ claim / release (parallel batch workers)');
-    const Image = require('../src/models/Image'); // same mongoose connection as the server
+    const Image = require('../src/models/ImageToBay'); // same mongoose connection as the server
 
     r = await call('POST', '/api/sessions', { key: API_KEY, body: { title: 'Claim probe session' } });
     const s3 = r.json.data._id;

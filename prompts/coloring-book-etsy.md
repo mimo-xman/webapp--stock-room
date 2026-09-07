@@ -232,17 +232,18 @@ Note the recurring positive patterns from your research and apply them to your p
 ## STEP 2 — Design the book
 
 **2.0 — Check the existing library (avoid duplicates).** Before designing anything, pull
-every image already in the database:
+the existing Etsy products AND every stock image already in the database:
 
 ```
+GET [STOCK ROOM API LINK]/api/etsy-products?limit=100
 GET [STOCK ROOM API LINK]/api/images/all
 Headers: X-API-Key: [STOCK ROOM API KEY]
-→ { "data": [ { "title", "keywords", "prompt", … } ], "count": N }
+→ { "data": [ … ], "count": N }
 ```
 
 If a previous coloring book on the same theme already exists, vary the subjects and the
-composition meaningfully — not the same 20 subjects in the same order. If the answer contains
-`"truncated": true`, page through `GET …/api/images?limit=100&page=N`.
+composition meaningfully — not the same 20 subjects in the same order. If an answer contains
+`"truncated": true`, page through the matching list endpoint.
 
 **2.1 — Book identity.**
 
@@ -338,55 +339,104 @@ Settings (deliberate — print product):
   images, say so in the final report and enforce the strongest textual exclusions instead.
 - Generate sequentially (one job at a time) — the queue is serialized server-side anyway.
 
-## STEP 5 — Register each result (Stock Room API)
+## STEP 5 — Register the PRODUCT with its images (Stock Room API)
 
-Immediately after each success:
+A coloring book is an **Etsy product**: one record that bundles the cover + every page
+behind ONE shared Etsy listing metadata block. Register it in two moves.
+
+**5a — Create the product with the cover (immediately after the cover succeeds):**
 
 ```
-POST [STOCK ROOM API LINK]/api/images
+POST [STOCK ROOM API LINK]/api/etsy-products
 Headers: X-API-Key: [STOCK ROOM API KEY]
 Body: {
-  "session_id": "<from STEP 3>",
-  "prompt":     "<the exact generation prompt you sent>",
-  "ratio":      "3:4",
-  "quality":    "2K",
-  "image_link": "<from STEP 4>",
-  "title":      "<see conventions below>",
-  "category":   "Graphic Resources",
-  "keywords":   ["<kw1>", "<kw2>", … ]
+  "session_id":   "<from STEP 3>",
+  "product_type": "coloring_book",
+  "images": [
+    {
+      "image_link": "<the generated cover URL>",
+      "role":       "cover",
+      "caption":    "<Book title> — Cover",
+      "prompt":     "<the exact cover prompt you sent>",
+      "ratio":      "3:4",
+      "quality":    "2K"
+    }
+  ],
+  "metadata": {
+    "title":       "<Etsy listing title — see conventions below>",
+    "description": "<full Etsy listing description — see conventions below>",
+    "tags":        ["<tag1>", "<tag2>", … ],
+    "category":    "<Etsy taxonomy path you researched at STEP 1a>",
+    "price":       <USD number, e.g. 4.99>
+  },
+  "file_link":    ""
 }
+→ 201 { "data": { "_id": "<PRODUCT_ID>", … } }
 ```
 
-Metadata conventions:
+Remember `data._id` — it is your `PRODUCT_ID` for every page.
 
-- **title** — `"<Book title> — Cover"` for the cover, `"<Book title> — Page <N>: <subject>"`
-  for pages (e.g. `Busy Machines Coloring Book — Page 7: Cement Mixer`). N is the final
-  page order. 3–200 characters, no trailing punctuation.
-- **category** — `Graphic Resources` (line art printables) for every image of the book.
-- **keywords** — 25–49 keywords, most important first, lowercase, no duplicates. Stack:
-  product terms (`coloring page`, `coloring book`, `printable`, `kids activity`, `digital
-  download`, `instant download`, `print at home`, `line art`, `black and white`) → theme
-  terms (matching the non-living theme: e.g. `construction`, `vehicles`, `excavator`, `dump
-  truck`…) → use-case terms (`gift for kids`,
-  `birthday activity`, `toddler`, `preschool`, `ages 4-8`…).
-- `keywords` is a JSON array of 3–50 strings. Do not set `used_in_adobe_stock` — the owner
-  marks images as used after publishing the book on Etsy.
+**5b — Append each finished page (immediately after each page succeeds):**
+
+```
+POST [STOCK ROOM API LINK]/api/etsy-products/<PRODUCT_ID>/images
+Headers: X-API-Key: [STOCK ROOM API KEY]
+Body: {
+  "image_link": "<the generated page URL>",
+  "role":       "page",
+  "caption":    "<Book title> — Page <N>: <subject>",
+  "prompt":     "<the exact generation prompt you sent>",
+  "ratio":      "3:4",
+  "quality":    "2K"
+}
+→ 201 { "data": { … } }
+```
+
+Metadata conventions (Etsy's official limits, validated by the API):
+
+- **metadata.title** — the ETSY LISTING title (≤ 140 characters, not the internal book
+  title): the main keyword first, then supporting keywords, e.g. `Printable Coloring
+  Book – Construction Vehicles – 20 Pages – Kids Activity – Instant Download – Digital
+  Download`. Keep the most important words in the first 40 characters.
+- **metadata.description** — the full Etsy listing description (≥ 10 characters): a warm
+  2-paragraph pitch (what it is, age group, what is included: N printable pages + cover,
+  instant download, print at home), then a bullet list (page size US Letter 8.5×11, black
+  & white line art, no physical item shipped, personal use license).
+- **metadata.tags** — up to 13 tags, each ≤ 20 characters, lowercase, multi-word phrases
+  buyers actually search: `coloring book`, `printable`, `kids activity`, `construction
+  vehicles`, `digital download`, `instant download`, `toddler activity`, `birthday
+  activity`, `line art`, `preschool`, `ages 4 8`, `boys gift`, `coloring pages`. NEVER
+  exceed 20 characters per tag — the API rejects longer tags.
+- **metadata.category** — the Etsy taxonomy path you researched at STEP 1a (e.g.
+  `Toys & Games > Games > Coloring Books`).
+- **metadata.price** — a USD number ≥ 0.20, based on your STEP 1b research of comparable
+  printable coloring books (typically 2–7 USD).
+- **image captions** — `"<Book title> — Cover"` for the cover,
+  `"<Book title> — Page <N>: <subject>"` for pages (e.g. `Busy Machines Coloring Book
+  — Page 7: Cement Mixer`). N is the final page order.
+- Do NOT set `used_in_etsy` — the owner marks the product as listed after publishing it
+  on Etsy. If you assembled a ready-to-sell PDF/ZIP somewhere, put its URL in
+  `file_link` (otherwise leave it empty — the owner assembles the deliverable from the
+  pages).
 
 ## STEP 6 — Verify and report (do not skip)
 
 ```
-GET [STOCK ROOM API LINK]/api/images?session_id=<id>&limit=100
+GET [STOCK ROOM API LINK]/api/etsy-products?session_id=<id>&limit=100
 Headers: X-API-Key: [STOCK ROOM API KEY]
 ```
 
-Confirm `pagination.total` equals 1 + [NUMBER OF COLORING PAGES] (cover + pages) and every
-record is complete. Then output a final report:
+Confirm the session holds ONE product whose `images` array counts 1 + [NUMBER OF COLORING
+PAGES] entries (cover first, then pages in order) and whose `metadata` is complete (title,
+description, tags, category, price). Then output a final report:
 
-- session title + id
+- session title + id, product id
 - the theme you picked, why you picked it, and the demand evidence behind it (STEP 1b sources)
   — plus how you kept it compliant with the GLOBAL CONTENT RULES (non-living theme)
 - the book title, the chosen age group and style
-- ordered table: page # / subject / title / keywords count / image_link (cover first)
+- the stored Etsy listing metadata: title / tags / category / price — ready to paste into
+  the Etsy listing form
+- ordered table: page # / subject / caption / image_link (cover first)
 - generation stats: attempts, durations, any replaced or skipped pages and why
 - quality control: every image rejected at the visual check and the exact reason (living
   being, face, body part — GLOBAL CONTENT RULES; gray
@@ -396,8 +446,7 @@ record is complete. Then output a final report:
   theme (the angle and style decisions, with the saturation evidence you found at STEP 1b),
   and how the pages differ from each other
 - Etsy compliance: the rules you found and applied at STEP 1a (list your sources)
-- a suggested listing description (title + 2 short paragraphs + bullet list) the owner can
-  paste into Etsy
+- a suggested listing description refinement (if the owner wants to tune the stored one)
 - anything the owner should know (quota messages, slow generations)
 
 ## If the APIs misbehave
@@ -440,27 +489,31 @@ Auth: header `X-API-Key: [STOCK ROOM API KEY]`.
 |---|---|
 | `POST /api/sessions` | Create a session `{ "title": "…" }` (unique) |
 | `GET /api/sessions` | List sessions (page/limit/search/sort/order) |
-| `GET /api/sessions/:id` | Session + counts |
-| `DELETE /api/sessions/:id` | Delete session **and all its images** |
-| `POST /api/images` | Register an image (full metadata) |
-| `GET /api/images` | List/filter images (`session_id`, `category`, `used_in_adobe_stock`, `quality`, `search`, `sort`, `order`, `page`, `limit` ∈ 5/10/20/50/100) |
-| `GET /api/images/all` | **Every image in one call** — run this BEFORE generating (STEP 2.0) to avoid duplicates; `?with_links=1` also returns `image_link` + `upscales` |
-| `GET /api/images/:id` | One image |
-| `PATCH /api/images/:id` | Edit fields (owner marks `used_in_adobe_stock`) |
-| `DELETE /api/images/:id` | Delete one image |
-| `GET /api/images/:id/download` | Download the image file (proxied) |
+| `GET /api/sessions/:id` | Session + counts (images + products) |
+| `DELETE /api/sessions/:id` | Delete session **and all its images + Etsy products** |
+| `POST /api/etsy-products` | **Create an Etsy product** — images[] + ONE shared listing metadata block (STEP 5a) |
+| `POST /api/etsy-products/:id/images` | **Append ONE image** (a finished page) to a product (STEP 5b) |
+| `GET /api/etsy-products` | List products (`session_id`, `product_type`, `used_in_etsy`, `search`, `sort`, `order`, `page`, `limit`) |
+| `GET /api/etsy-products/:id` | One product (all its images + metadata) |
+| `PATCH /api/etsy-products/:id` | Edit product fields (metadata merge, images, `used_in_etsy`) |
+| `DELETE /api/etsy-products/:id` | Delete a product |
+| `GET /api/images` / `GET /api/images/all` | Stock-image endpoints (other missions) — NOT used for the book pages |
+| `GET /api/images/:id/download` | Download an image file (proxied) |
 
-Validation highlights: `category` must be one of the 21 categories; `title` 3–200 chars;
-`keywords` 3–50 entries; `image_link` must be http(s); `session_id` must exist.
+Etsy product validation highlights: `metadata.title` 3–140 chars; `metadata.tags` ≤ 13
+entries of ≤ 20 chars each; `metadata.price` ≥ 0.20 USD; `images` ≥ 1 entry with an
+http(s) `image_link`; `session_id` must exist. `product_type` must be one of:
+coloring_book, activity_book, party_invitations, wall_art_set, printable_set,
+clipart_bundle, digital_download, other.
 
-## APPENDIX C — The 21 Stock Room categories (exact values)
+## APPENDIX C — The 21 Adobe Stock categories (exact values)
 
 Animals, Buildings and Architecture, Business, Drinks, The Environment, States of Mind, Food,
 Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and
 Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel.
 
-(For this mission use `Graphic Resources` for every image — line-art printables. The taxonomy
-is shared by all Stock Room missions, platform-agnostic.)
+(Not used by this mission — Etsy products carry Etsy listing metadata instead of stock
+categories. The list stays here for reference because the Stock Room image library shares it.)
 
 ## APPENDIX D — Prompt formulas (line art + cover)
 

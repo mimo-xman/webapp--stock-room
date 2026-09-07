@@ -3,7 +3,13 @@
  * Static HTML, no build step — matches the web app's "stockroom" identity.
  */
 const { CONFIG } = require('../config');
-const { ADOBE_CATEGORIES, PAGE_SIZES } = require('../constants');
+const {
+  ADOBE_CATEGORIES,
+  SHUTTERSTOCK_CATEGORIES,
+  STOCK_PLATFORM_IDS,
+  ETSY_PRODUCT_TYPES,
+  PAGE_SIZES,
+} = require('../constants');
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
@@ -16,23 +22,29 @@ const endpointRows = [
   ['GET', '/health', 'Service health — version, DB state', false],
   ['GET', '/ready', 'Readiness probe — 200 when DB is up', false],
   ['POST', '/auth/verify', 'Password gate check for the web app — body { "password": "…" }', false],
-  ['GET', '/api/sessions', 'List sessions — pagination, search, sort, date range', true],
+  ['GET', '/api/sessions', 'List sessions — pagination, search, sort, date range (+ imagesCount / productsCount)', true],
   ['POST', '/api/sessions', 'Create a session — body { "title": "…" } (unique)', true],
-  ['GET', '/api/sessions/:id', 'One session + imagesCount / usedCount', true],
-  ['DELETE', '/api/sessions/:id', 'Delete a session and ALL its images (cascade)', true],
-  ['GET', '/api/images', 'List images — pagination, search, filters, sort', true],
+  ['GET', '/api/sessions/:id', 'One session + imagesCount / usedCount / productsCount', true],
+  ['DELETE', '/api/sessions/:id', 'Delete a session and ALL its images + Etsy products (cascade)', true],
+  ['GET', '/api/images', 'List sellable images (images_to_bay) — pagination, search, filters, sort', true],
   ['GET', '/api/images/all', 'Every image in one call — agent dedup check before generating (lean fields; ?with_links=1 adds links + upscales)', true],
-  ['POST', '/api/images', 'Register a generated image (full metadata)', true],
+  ['POST', '/api/images', 'Register a generated image with per-platform metadata (see example below)', true],
   ['POST', '/api/images/claim', 'PARALLEL BATCH WORKER — atomically reserve the oldest eligible image (upscales < max, active, free). Body { max_upscales?, stale_minutes? } → { data: image|null, claimed }', true],
   ['POST', '/api/images/:id/release', 'Batch worker reports the attempt outcome — { status: ok|stopped|error, error_message? }. error → image paused (active:false) + error_message recorded', true],
-  ['GET', '/api/images/:id', 'One image (incl. its upscales)', true],
-  ['PATCH', '/api/images/:id', 'Edit image metadata (incl. used_in_adobe_stock, active, error_message)', true],
+  ['GET', '/api/images/:id', 'One image (per-platform metadata + upscales)', true],
+  ['PATCH', '/api/images/:id', 'Edit image fields (metadata.<platform> blocks, used flags, active, error_message…)', true],
   ['DELETE', '/api/images/:id', 'Delete an image', true],
   ['GET', '/api/images/:id/download', 'Download the image file (server-side proxy)', true],
   ['POST', '/api/images/:id/upscales', 'Register an upscaled variant (Real-ESRGAN job) — 409 UPSCALE_LIMIT_REACHED when the image already holds max_upscales entries', true],
   ['PATCH', '/api/images/:id/upscales/:upscaleId', 'Mark an upscaled variant used / unused', true],
   ['DELETE', '/api/images/:id/upscales/:upscaleId', 'Delete an upscaled variant (+ Cloudinary destroy when configured)', true],
   ['GET', '/api/images/:id/upscales/:upscaleId/download', 'Download an upscaled variant (proxy)', true],
+  ['GET', '/api/etsy-products', 'List Etsy digital products — filters: session_id, product_type, used_in_etsy', true],
+  ['POST', '/api/etsy-products', 'Create a product — images[] + one shared Etsy listing metadata block', true],
+  ['GET', '/api/etsy-products/:id', 'One product (all its images + metadata)', true],
+  ['PATCH', '/api/etsy-products/:id', 'Edit product fields (metadata merge, images, used_in_etsy…)', true],
+  ['POST', '/api/etsy-products/:id/images', 'Append ONE image (e.g. a finished coloring page) to a product', true],
+  ['DELETE', '/api/etsy-products/:id', 'Delete a product', true],
 ];
 
 const rowsHtml = endpointRows
@@ -95,10 +107,13 @@ module.exports = `<!doctype html>
 <div class="wrap">
   <span class="tag">Asset database API</span>
   <h1>Stock Room API</h1>
-  <p class="sub">Persistence layer for <strong>Stock Room</strong> — mission-agnostic asset
-  dispatch for AI-generated images (Adobe Stock, Etsy, Redbubble, Instagram, ads…).
-  AI agents register generation sessions and image metadata here; the Next.js web app
-  reads and manages the same data behind a password gate.</p>
+  <p class="sub">Persistence layer for <strong>Stock Room</strong> — multi-platform asset
+  dispatch for AI-generated images. Sellable images (<code>images_to_bay</code>)
+  carry upload metadata for every stock marketplace (Adobe Stock, Shutterstock,
+  Wirestock, iStock, Pond5, Depositphotos, 123RF, Dreamstime); Etsy digital
+  products (<code>etsy_products</code>) bundle one or many images (coloring books,
+  invitations…) behind one shared listing. AI agents register the data here;
+  the Next.js web app reads and manages it behind a password gate.</p>
 
   <div class="panel">
     <h2>Authentication — dual credential</h2>
@@ -122,26 +137,36 @@ module.exports = `<!doctype html>
 
   <div class="panel">
     <h2>Listing contract (server-enforced)</h2>
-    <p>Applies to <code>GET /api/sessions</code> and <code>GET /api/images</code>:</p>
+    <p>Applies to <code>GET /api/sessions</code>, <code>GET /api/images</code> and
+    <code>GET /api/etsy-products</code>:</p>
     <pre>page      integer ≥ 1
 limit     one of ${PAGE_SIZES.join(', ')}          (default 10)
 search    case-insensitive, escaped
 sort      whitelisted field per resource
 order     asc | desc               (default desc)
 from / to ISO dates on createdAt</pre>
-    <p>Images also accept exact filters: <code>session_id</code>, <code>category</code>,
-    <code>used_in_adobe_stock=true|false</code>, <code>quality</code>, <code>ratio</code>,
+    <p>Images also accept exact filters: <code>session_id</code>, <code>category</code>
+    (Adobe category), <code>platform=&lt;id&gt;</code> (metadata present for that
+    platform), <code>used=true|false</code> (used on ANY platform),
+    <code>used_platform=&lt;id&gt;&amp;used_platform_value=true|false</code> (per-platform),
+    <code>quality</code>, <code>ratio</code>,
     <code>active=true|false</code> (webapp Status filter — paused/failed images),
     <code>in_use=true|false</code> (claimed by a batch worker),
     plus upscale filters: <code>has_upscales=true|false</code> (webapp) or
     <code>upscales_lt=N</code> — images with fewer than N upscales (daily batch job).
+    Etsy products accept <code>session_id</code>, <code>product_type</code>,
+    <code>used_in_etsy=true|false</code>.
     Response envelope:</p>
     <pre>{"data":[ … ],"pagination":{"page":1,"limit":10,"total":42,"totalPages":5}}</pre>
   </div>
 
   <div class="panel">
-    <h2>Register an image (agent)</h2>
-    <pre>curl -X POST ${'${ADOBE_STOCK_API}'}/api/images \\
+    <h2>Register an image (agent) — per-platform metadata</h2>
+    <p>Every sellable image stores its upload metadata for EACH marketplace:
+    <span class="mono">${esc(STOCK_PLATFORM_IDS.join(', '))}</span>.
+    Only <code>metadata.adobe_stock</code> is required — missing platforms are
+    auto-derived from it (the generation agent writes the real values itself).</p>
+    <pre>curl -X POST ${'${STOCK_ROOM_API}'}/api/images \\
   -H "X-API-Key: ${'${AGENT_KEY}'}" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -150,12 +175,56 @@ from / to ISO dates on createdAt</pre>
     "ratio": "16:9",
     "quality": "1K",
     "image_link": "https://…/result.png",
-    "title": "Minimal ceramic cups on linen, top view",
-    "category": "Food",
-    "keywords": ["ceramic cup","linen","minimalism", … 25-49 keywords …]
+    "metadata": {
+      "adobe_stock":    { "title": "Minimal ceramic cups on linen, top view",
+                          "category": "Food",
+                          "keywords": ["ceramic cup","linen","minimalism", … ] },
+      "shutterstock":   { "description": "…", "categories": ["Objects"], "keywords": [ … ] },
+      "istock":         { "title": "…", "description": "…", "keywords": [ … ] },
+      "wirestock":      { "title": "…", "description": "…", "keywords": [ … ] },
+      "pond5":          { "title": "…", "description": "…", "keywords": [ … ], "price": 5 },
+      "depositphotos":  { "description": "…", "keywords": [ … ] },
+      "123rf":          { "description": "…", "keywords": [ … ] },
+      "dreamstime":     { "title": "…", "description": "…", "keywords": [ … ] }
+    },
+    "used": { "adobe_stock": false, "shutterstock": false }
   }'</pre>
-    <p><code>category</code> must be exactly one of the ${ADOBE_CATEGORIES.length} Adobe Stock categories:
+    <p>Adobe <code>category</code> must be exactly one of the ${ADOBE_CATEGORIES.length}
+    official categories:
     <span class="mono">${esc(ADOBE_CATEGORIES.join(', '))}</span>.</p>
+    <p>Shutterstock <code>categories</code>: 1–2 of
+    <span class="mono">${esc(SHUTTERSTOCK_CATEGORIES.join(', '))}</span>.</p>
+    <p>Legacy flat <code>title</code> / <code>category</code> / <code>keywords</code> /
+    <code>used_in_adobe_stock</code> are still accepted and mapped onto
+    <code>metadata.adobe_stock</code> / <code>used.adobe_stock</code>.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Create an Etsy digital product (agent)</h2>
+    <pre>curl -X POST ${'${STOCK_ROOM_API}'}/api/etsy-products \\
+  -H "X-API-Key: ${'${AGENT_KEY}'}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "session_id": "65f1…",
+    "product_type": "coloring_book",
+    "images": [
+      { "image_link": "https://…/cover.png",  "role": "cover", "caption": "Book cover" },
+      { "image_link": "https://…/page-01.png", "role": "page",  "caption": "Page 1 — castle" }
+    ],
+    "metadata": {
+      "title": "Cozy Castle Coloring Book — 20 Printable Pages",
+      "description": "…full Etsy listing description…",
+      "tags": ["coloring book", "printable", "kids activity"],
+      "category": "Toys & Games > Games > Coloring Books",
+      "price": 4.99
+    },
+    "file_link": "https://…/book.pdf"
+  }'</pre>
+    <p><code>product_type</code> is one of
+    <span class="mono">${esc(ETSY_PRODUCT_TYPES.join(', '))}</span>.
+    Etsy limits (validated): title ≤ 140 chars, max 13 tags of ≤ 20 chars each,
+    price ≥ $0.20. Append more pages later with
+    <code>POST /api/etsy-products/:id/images</code>.</p>
   </div>
 
   <div class="panel">

@@ -30,7 +30,7 @@
  */
 
 import { BUNDLED_TEMPLATE_MAIN } from "./prompt-templates/main";
-import { BUNDLED_TEMPLATE_ADOBE_STOCK } from "./prompt-templates/adobe-stock";
+import { BUNDLED_TEMPLATE_STOCK_PLATFORMS } from "./prompt-templates/stock-platforms";
 import { BUNDLED_TEMPLATE_COLORING_BOOK_ETSY } from "./prompt-templates/coloring-book-etsy";
 import { GLOBAL_CONTENT_RULES } from "./prompt-templates/global-content-rules";
 import { GLOBAL_DISTINCTIVENESS_RULES } from "./prompt-templates/global-distinctiveness-rules";
@@ -158,13 +158,13 @@ export const PROMPTS: PromptDefinition[] = [
     ],
   },
   {
-    id: "adobe-stock",
-    title: "Adobe Stock",
-    tagline: "Sell-ready stock batch: saturation research on Adobe Stock, differentiation profiles, hard rules, upload metadata.",
-    purpose: "adobe stock",
+    id: "stock-platforms",
+    title: "Stock platforms — all marketplaces",
+    tagline: "Sell-ready batch for EVERY marketplace (Adobe Stock, Shutterstock, Wirestock, iStock, Pond5, Depositphotos, 123RF, Dreamstime): rules + saturation research, differentiation profiles, per-platform upload metadata.",
+    purpose: "stock marketplaces",
     icon: "store",
-    file: "prompts/adobe-stock.md",
-    bundled: BUNDLED_TEMPLATE_ADOBE_STOCK,
+    file: "prompts/stock-platforms.md",
+    bundled: BUNDLED_TEMPLATE_STOCK_PLATFORMS,
     specificVars: [
       {
         key: "numberOfPrompts",

@@ -5,7 +5,7 @@
  * A 401 kicks the user back to the gate (password changed or wrong).
  */
 
-import type { ListParams, ListResponse, Session, StockImage, Upscale, ApiErrorPayload } from "./types";
+import type { ListParams, ListResponse, Session, StockImage, Upscale, EtsyProduct, EtsyProductImage, EtsyProductMetadata, EtsyProductType, ApiErrorPayload } from "./types";
 import { getAppPassword, clearAppPassword } from "./auth";
 
 function resolveApiUrl(): string {
@@ -97,7 +97,7 @@ export const api = {
     create(title: string): Promise<{ data: Session }> {
       return request("/api/sessions", { method: "POST", body: JSON.stringify({ title }) });
     },
-    remove(id: string): Promise<{ data: { deleted: boolean; imagesDeleted: number } }> {
+    remove(id: string): Promise<{ data: { deleted: boolean; imagesDeleted: number; productsDeleted?: number } }> {
       return request(`/api/sessions/${id}`, { method: "DELETE" });
     },
   },
@@ -162,6 +162,35 @@ export const api = {
       },
     },
   },
+
+  // ── Etsy digital products ──────────────────────────────────────────
+  etsyProducts: {
+    list(params: ListParams): Promise<ListResponse<EtsyProduct>> {
+      return request(`/api/etsy-products?${buildListQuery(params)}`);
+    },
+    get(id: string): Promise<{ data: EtsyProduct }> {
+      return request(`/api/etsy-products/${id}`);
+    },
+    create(payload: {
+      session_id: string;
+      product_type: EtsyProductType;
+      images: Partial<EtsyProductImage>[];
+      metadata: EtsyProductMetadata;
+      file_link?: string;
+      used_in_etsy?: boolean;
+    }): Promise<{ data: EtsyProduct }> {
+      return request("/api/etsy-products", { method: "POST", body: JSON.stringify(payload) });
+    },
+    update(id: string, patch: Partial<EtsyProduct>): Promise<{ data: EtsyProduct }> {
+      return request(`/api/etsy-products/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+    },
+    remove(id: string): Promise<{ data: { deleted: boolean } }> {
+      return request(`/api/etsy-products/${id}`, { method: "DELETE" });
+    },
+    addImage(id: string, image: Partial<EtsyProductImage>): Promise<{ data: EtsyProduct }> {
+      return request(`/api/etsy-products/${id}/images`, { method: "POST", body: JSON.stringify(image) });
+    },
+  },
 };
 
 function saveBlob(blob: Blob, filename: string): void {
@@ -177,7 +206,7 @@ function saveBlob(blob: Blob, filename: string): void {
 
 function filenameFrom(image: StockImage, suffix = `_${image._id}`): string {
   const ext = (image.image_link.split("?")[0].split(".").pop() || "png").toLowerCase().slice(0, 5);
-  const slug = image.title
+  const slug = (image.title || image.metadata?.adobe_stock?.title || "image")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")

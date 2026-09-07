@@ -5,7 +5,8 @@
  * user may only modify Images). Sessions can be created, listed and deleted.
  */
 const Session = require('../models/Session');
-const Image = require('../models/Image');
+const Image = require('../models/ImageToBay');
+const EtsyProduct = require('../models/EtsyProduct');
 const { SESSION_SORT_FIELDS } = require('../constants');
 const {
   escapeRegex,
@@ -50,11 +51,20 @@ async function list(req, res, next) {
         { $match: match },
         {
           $lookup: {
-            from: 'images',
+            from: 'images_to_bay',
             localField: '_id',
             foreignField: 'session_id',
             as: 'sessionImages',
-            pipeline: [{ $project: { _id: 1, used_in_adobe_stock: 1 } }],
+            pipeline: [{ $project: { _id: 1, used_count: 1 } }],
+          },
+        },
+        {
+          $lookup: {
+            from: 'etsy_products',
+            localField: '_id',
+            foreignField: 'session_id',
+            as: 'sessionProducts',
+            pipeline: [{ $project: { _id: 1, used_in_etsy: 1 } }],
           },
         },
         {
@@ -65,13 +75,14 @@ async function list(req, res, next) {
                 $filter: {
                   input: '$sessionImages',
                   as: 'im',
-                  cond: { $eq: ['$$im.used_in_adobe_stock', true] },
+                  cond: { $gt: ['$$im.used_count', 0] },
                 },
               },
             },
+            productsCount: { $size: '$sessionProducts' },
           },
         },
-        { $project: { sessionImages: 0, __v: 0 } },
+        { $project: { sessionImages: 0, sessionProducts: 0, __v: 0 } },
         { $sort: { [sort]: dir, _id: dir } },
         { $skip: skip },
         { $limit: limit },
@@ -85,6 +96,7 @@ async function list(req, res, next) {
         title: d.title,
         imagesCount: d.imagesCount,
         usedCount: d.usedCount,
+        productsCount: d.productsCount,
         createdAt: d.createdAt,
         updatedAt: d.updatedAt,
       })),
@@ -111,11 +123,15 @@ async function getOne(req, res, next) {
     if (!session) {
       throw new HttpError(404, 'NOT_FOUND', `Session ${req.params.id} does not exist`);
     }
-    const [imagesCount, usedCount] = await Promise.all([
+    const [imagesCount, usedCount, productsCount, productsUsedCount] = await Promise.all([
       Image.countDocuments({ session_id: session._id }),
-      Image.countDocuments({ session_id: session._id, used_in_adobe_stock: true }),
+      Image.countDocuments({ session_id: session._id, used_count: { $gt: 0 } }),
+      EtsyProduct.countDocuments({ session_id: session._id }),
+      EtsyProduct.countDocuments({ session_id: session._id, used_in_etsy: true }),
     ]);
-    res.json({ data: { ...toPlain(session), imagesCount, usedCount } });
+    res.json({
+      data: { ...toPlain(session), imagesCount, usedCount, productsCount, productsUsedCount },
+    });
   } catch (err) {
     next(err);
   }
@@ -127,10 +143,13 @@ async function remove(req, res, next) {
     if (!session) {
       throw new HttpError(404, 'NOT_FOUND', `Session ${req.params.id} does not exist`);
     }
-    // Cascade: a session's images die with it.
-    const { deletedCount } = await Image.deleteMany({ session_id: session._id });
+    // Cascade: a session's images AND Etsy products die with it.
+    const [{ deletedCount }, { deletedCount: productsDeleted }] = await Promise.all([
+      Image.deleteMany({ session_id: session._id }),
+      EtsyProduct.deleteMany({ session_id: session._id }),
+    ]);
     await session.deleteOne();
-    res.json({ data: { deleted: true, imagesDeleted: deletedCount } });
+    res.json({ data: { deleted: true, imagesDeleted: deletedCount, productsDeleted } });
   } catch (err) {
     next(err);
   }

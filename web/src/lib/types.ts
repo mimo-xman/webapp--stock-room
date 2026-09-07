@@ -12,11 +12,85 @@ export interface Session {
   title: string;
   imagesCount: number;
   usedCount?: number;
+  productsCount?: number;
+  productsUsedCount?: number;
   createdAt: string;
   updatedAt: string;
 }
 
 export type Quality = "1K" | "2K" | "4K";
+
+export type PlatformId =
+  | "adobe_stock"
+  | "shutterstock"
+  | "istock"
+  | "wirestock"
+  | "pond5"
+  | "depositphotos"
+  | "123rf"
+  | "dreamstime";
+
+// ── per-platform metadata blocks (mirror the API's zod schemas) ─────────────
+
+export interface AdobeStockMeta {
+  title: string;
+  category: string;
+  keywords: string[];
+}
+
+export interface ShutterstockMeta {
+  description: string;
+  categories: string[];
+  keywords: string[];
+}
+
+export interface IStockMeta {
+  title: string;
+  description: string;
+  keywords: string[];
+}
+
+export interface WirestockMeta {
+  title: string;
+  description: string;
+  keywords: string[];
+}
+
+export interface Pond5Meta {
+  title: string;
+  description: string;
+  keywords: string[];
+  price?: number;
+}
+
+export interface DepositphotosMeta {
+  description: string;
+  keywords: string[];
+}
+
+export interface RF123Meta {
+  description: string;
+  keywords: string[];
+}
+
+export interface DreamstimeMeta {
+  title: string;
+  description: string;
+  keywords: string[];
+}
+
+export type PlatformMetadata = {
+  adobe_stock?: AdobeStockMeta;
+  shutterstock?: ShutterstockMeta;
+  istock?: IStockMeta;
+  wirestock?: WirestockMeta;
+  pond5?: Pond5Meta;
+  depositphotos?: DepositphotosMeta;
+  "123rf"?: RF123Meta;
+  dreamstime?: DreamstimeMeta;
+};
+
+export type PlatformUsed = Partial<Record<PlatformId, boolean>>;
 
 /** One Real-ESRGAN upscale variant on an image (see docs/UPSCALE.md). */
 export interface Upscale {
@@ -34,6 +108,15 @@ export interface Upscale {
   created_at?: string;
 }
 
+/**
+ * One sellable image (collection images_to_bay): sold individually on the
+ * stock marketplaces, each with its own per-platform upload metadata and
+ * per-platform "used" flags.
+ *
+ * `title` / `category` / `keywords` / `used_in_adobe_stock` are legacy flat
+ * projections kept by the API for compatibility (mirrored from
+ * metadata.adobe_stock / used.adobe_stock).
+ */
 export interface StockImage {
   _id: string;
   session_id: string;
@@ -41,11 +124,14 @@ export interface StockImage {
   ratio: string;
   quality: Quality;
   image_link: string;
+  metadata: PlatformMetadata;
+  used: PlatformUsed;
+  /** Number of platforms where the image is marked used (sort/filter). */
+  used_count?: number;
+  /** Legacy flat projections (from metadata.adobe_stock). */
   title: string;
   category: string;
   keywords: string[];
-  /** Generic "used/published" flag (image already consumed on its destination
-   *  platform). Historical wire name kept for API compatibility. */
   used_in_adobe_stock: boolean;
   /** Batch-worker coordination (parallel upscale workflow). Absent on
    *  images created before the feature — treat absent as active/not-in-use. */
@@ -56,6 +142,51 @@ export interface StockImage {
   /** Upscaled variants (Real-ESRGAN via GitHub Actions) — absent on images
    *  created before the feature; always use `image.upscales ?? []`. */
   upscales?: Upscale[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ── Etsy digital products ───────────────────────────────────────────────────
+
+export type EtsyProductType =
+  | "coloring_book"
+  | "activity_book"
+  | "party_invitations"
+  | "wall_art_set"
+  | "printable_set"
+  | "clipart_bundle"
+  | "digital_download"
+  | "other";
+
+export type EtsyImageRole = "cover" | "page" | "asset" | "preview";
+
+export interface EtsyProductImage {
+  _id?: string;
+  image_link: string;
+  role: EtsyImageRole;
+  caption: string;
+  ratio: string;
+  quality: string;
+  upscales?: Upscale[];
+}
+
+export interface EtsyProductMetadata {
+  title: string;
+  description: string;
+  tags: string[];
+  category: string;
+  price?: number;
+}
+
+export interface EtsyProduct {
+  _id: string;
+  session_id: string;
+  product_type: EtsyProductType;
+  images: EtsyProductImage[];
+  metadata: EtsyProductMetadata;
+  file_link: string;
+  used_in_etsy: boolean;
+  imagesCount?: number;
   createdAt: string;
   updatedAt: string;
 }

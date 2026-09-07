@@ -1,16 +1,21 @@
 # ── Stock Room ──
 
 **Stock Room** est le hub de dispatch des images générées par IA : un **agent IA** reçoit une
-mission (batch Adobe Stock, coloring book Etsy, visuels d'événement Instagram, scènes d'une
-vidéo, créations publicitaires…), génère les images via l'API
+mission (batch stock multi-plateformes, coloring book Etsy, visuels d'événement Instagram,
+scènes d'une vidéo, créations publicitaires…), génère les images via l'API
 [Zazo Image Studio](https://github.com/mimo-xman/webapp--zazo-image-studio),
-et enregistre chaque asset (image + métadonnées) dans une base de données, **une Session par
-mission**. Le propriétaire gère ensuite le tout depuis une webapp protégée par mot de passe.
+et enregistre chaque asset dans une base de données, **une Session par mission** — les
+**images vendables une par une** (`images_to_bay`, avec leurs métadonnées d'upload par
+plateforme) et les **produits digitaux Etsy** (`etsy_products`, plusieurs images derrière
+une seule fiche). Le propriétaire gère ensuite le tout depuis une webapp protégée par mot
+de passe.
 
 > Historique : le projet s'appelait *Adobe Stock — Images Generator by agents* car la
 > première mission était la production d'images pour Adobe Stock. Le nom a changé quand les
-> missions se sont multipliées (Etsy, Redbubble, Instagram, pubs, scènes vidéo…) : Stock Room
-> est **agnostique de la plateforme**. Les repos GitHub sont renommés
+> missions se sont multipliées : Stock Room vend aujourd'hui la même image sur **8
+> marketplaces** (Adobe Stock, Shutterstock, Wirestock, iStock/Getty, Pond5,
+> Depositphotos, 123RF, Dreamstime) — chaque plateforme a ses propres métadonnées,
+> stockées **par image, pour chaque plateforme**. Les repos GitHub sont renommés
 > (`webapp--stock-room` et `webapp--zazo-image-studio`) — les anciennes URLs redirigent
 > automatiquement.
 
@@ -23,7 +28,8 @@ mission**. Le propriétaire gère ensuite le tout depuis une webapp protégée p
        ▼
 ┌──────────────────┐  image URL   ┌─────────────────────────────────┐
 │ Zazo Image Studio│ ───────────► │  Stock Room API  (Render)       │
-│  (Render, Tor)   │              │  Sessions → Images (MongoDB)    │
+│  (Render, Tor)   │              │  images_to_bay + etsy_products │
+│                  │              │  + sessions  (MongoDB)         │
 └──────────────────┘              └───────────────┬─────────────────┘
                                                   │ 4. lecture/édition
                                                   ▼
@@ -46,9 +52,9 @@ détaillé est dans [`AGENT_PROMPT.md`](AGENT_PROMPT.md)) :
 
 | Prompt | Mission | Variable spécifique |
 |---|---|---|
-| [`prompts/main.md`](prompts/main.md) | **Universel** — explique les deux APIs + la structure Session → Images ; tu décris la mission (n'importe quoi : visuels Instagram, scènes vidéo, pubs…) | `[MISSION BRIEF]` |
-| [`prompts/adobe-stock.md`](prompts/adobe-stock.md) | Batch **Adobe Stock** — recherche de règles en live, **recherche de saturation sur stock.adobe.com** (règles de distinctivité), règles dures (aucun être vivant, aucun visage/partie du corps), **profils de différenciation par image** (jamais la depiction par défaut), métadonnées prêtes à l'upload | `[NUMBER OF PROMPTS TO CREATE]` |
-| [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Coloring book Etsy** — pages line-art pour enfants + couverture, print-ready ; l'agent **recherche lui-même le thème tendance le plus demandé** sur Etsy et le choisit **SANS êtres vivants** (règles de contenu du propriétaire — véhicules, machines, bâtiments, jouets, plantes, motifs…) (pas de variable thème — il décide et justifie) | `[NUMBER OF COLORING PAGES]` |
+| [`prompts/main.md`](prompts/main.md) | **Universel** — explique les deux APIs + les structures images / produits Etsy ; tu décris la mission (n'importe quoi : visuels Instagram, scènes vidéo, pubs…) | `[MISSION BRIEF]` |
+| [`prompts/stock-platforms.md`](prompts/stock-platforms.md) | Batch stock **multi-plateformes** (Adobe Stock, Shutterstock, Wirestock, iStock/Getty, Pond5, Depositphotos, 123RF, Dreamstime) — recherche de règles + **politique IA par plateforme** en live, **recherche de saturation sur les marketplaces**, règles dures (aucun être vivant, aucun visage/partie du corps), **profils de différenciation par image**, **métadonnées d'upload par plateforme** stockées sur chaque image (title/description/categories/keywords aux formats et limites de chacune) | `[NUMBER OF PROMPTS TO CREATE]` |
+| [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Coloring book Etsy** — pages line-art pour enfants + couverture, print-ready ; l'agent **recherche lui-même le thème tendance le plus demandé** sur Etsy et le choisit **SANS êtres vivants** (règles de contenu du propriétaire — véhicules, machines, bâtiments, jouets, plantes, motifs…) ; le livre est sauvé comme **UN produit Etsy** (couverture + pages + métadonnées complètes de fiche : title ≤ 140, 13 tags ≤ 20 caractères, catégorie, prix) | `[NUMBER OF COLORING PAGES]` |
 
 ### Les règles de contenu du propriétaire — dans tous les prompts, présents et futurs
 
@@ -102,8 +108,8 @@ les vérifie) + une entrée dans `web/src/lib/prompts.ts`.
 
 | Chemin | Contenu | Hébergement |
 |---|---|---|
-| `api/` | API Node.js + Express + Mongoose (Sessions/Images, auth double, validation zod, rate limit, pagination/search/filter/sort backend, proxy download, cascade delete, **upscales** : endpoints + filtres + cap serveur, **`GET /api/images/all`** : toute la librairie en un appel pour l'anti-doublons de l'agent) | **Render** (runtime Node) |
-| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images, tampon « Used », copy icons, modales custom, **navigation prev/next en boucle dans le détail**, **affichage des upscales**, **export CSV Adobe Stock**, **statut batch**, **page « Agent prompts »** : switcher multi-prompts + variables partagées + validation → prompt généré copiable/téléchargeable en .md, **jeu d'icônes complet** : `icon.svg` + `apple-icon.png` + `favicon.ico` « SR ») | **Cloudflare Workers** (ou Netlify) |
+| `api/` | API Node.js + Express + Mongoose (**images_to_bay** avec métadonnées par plateforme + flags `used` par plateforme, **etsy_products** : produits digitaux multi-images + métadonnées de fiche Etsy, Sessions, auth double, validation zod par plateforme, rate limit, pagination/search/filter/sort backend, proxy download, cascade delete, **upscales** : endpoints + filtres + cap serveur, **`GET /api/images/all`** : toute la librairie en un appel pour l'anti-doublons de l'agent, **`api/scripts/migrate-to-multiplatform.cjs`** : migration de l'ancien schéma plat) | **Render** (runtime Node) |
+| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images/**Etsy**, tampons « Used » par plateforme, copy icons, modales custom, **navigation prev/next en boucle dans le détail**, **affichage des upscales**, **export CSV multi-plateformes avec sélecteur de plateforme** (Adobe Stock, Shutterstock, Dreamstime, 123RF, Pond5 — formats officiels ; iStock/Wirestock/Depositphotos = coming soon), **cartes de métadonnées par plateforme dans le détail + onglets par plateforme dans le formulaire**, **statut batch**, **page « Agent prompts »** : switcher multi-prompts + variables partagées + validation → prompt généré copiable/téléchargeable en .md, **jeu d'icônes complet** : `icon.svg` + `apple-icon.png` + `favicon.ico` « SR ») | **Cloudflare Workers** (ou Netlify) |
 | `prompts/` | **Les prompts réutilisables** à donner à l'agent — un `.md` par type de mission (variables à remplacer + partie sous la ligne ✂ CUT) | — |
 | `AGENT_PROMPT.md` | Index des prompts + mode d'emploi | — |
 | `.github/workflows/` | **Jobs d'upscale Real-ESRGAN** : batch quotidien 08:00 Maroc + job manuel image unique (réveil auto de l'API Render, logs heartbeat, sortie JPEG prête à vendre) | **GitHub Actions** |
@@ -261,23 +267,27 @@ lien mort.
 
 ➡️ **Guide complet (secrets, inputs, formats, erreurs, quota) : [`docs/UPSCALE.md`](docs/UPSCALE.md)**
 
-### 6. Export CSV Adobe Stock (webapp)
+### 6. Export CSV multi-plateformes (webapp)
 
 Sur les pages *Images* et *Session* : sélectionne les assets voulus — **originaux et/ou leurs
 upscales** — via les checkboxes (carte = original ; détail = original + chaque variante).
 La sélection **survit aux changements de pages/filtres** (barre flottante en bas), puis le
-bouton **Download CSV** génère le fichier `Filename,Title,Keywords,Category` exactement au
-format de l'upload par CSV d'Adobe Stock (catégorie = code numérique 1-21, filename = basename
-de l'URL de l'asset, keywords cités, doublons de noms renommés automatiquement). Les upscales
-exportées réutilisent les métadonnées de leur image d'origine.
+bouton **Download CSV** ouvre **une popup de choix de plateforme** : chaque marketplace y
+apparaît avec son statut (CSV prêt / coming soon) et son badge de politique IA. Cliquer sur
+une plateforme génère le CSV **dans SON format officiel** — Adobe Stock
+(`Filename,Title,Keywords,Category`), Shutterstock (`Filename,Description,Keywords,Categories`),
+Dreamstime (`Filename,Title,Description,Keywords`), 123RF (tout entre guillemets,
+`oldfilename,…,country`), Pond5 (`originalfilename,title,description,keywords,price` en ASCII
+pur). Les métadonnées lues sont celles **stockées par plateforme** sur chaque image
+(`metadata.adobe_stock`, `metadata.shutterstock`…). iStock / Wirestock / Depositphotos :
+pas de format CSV public → « coming soon » (les métadonnées sont déjà stockées).
 
-➡️ **Détails + table des catégories : [`docs/CSV_EXPORT.md`](docs/CSV_EXPORT.md)**
+➡️ **Détails + formats + table des catégories : [`docs/CSV_EXPORT.md`](docs/CSV_EXPORT.md)**
 
-## Règles métier absolues — mission Adobe Stock
+## Règles métier absolues — missions stock (toutes plateformes)
 
-Ces règles ne s'appliquent **qu'au prompt Adobe Stock** (chaque prompt porte ses propres
-règles — le coloring book Etsy, par exemple, exige des animaux mignons, donc PAS de règle
-« aucun être vivant »).
+Ces règles s'appliquent **aux prompts de missions stock** (stock-platforms et main) — le
+coloring book Etsy suit les mêmes règles de contenu (le prompt les embarque aussi).
 
 **1 — Aucun être vivant dans les images générées** (ni humains, ni animaux — silhouettes,
 illustrations et ombres incluses ; plantes/fleurs autorisées).

@@ -12,11 +12,11 @@ import { PaginationBar } from "@/components/app/PaginationBar";
 import { ImageGrid } from "@/components/app/ImageGrid";
 import { ImageDetailDialog } from "@/components/app/ImageDetailDialog";
 import { ImageFormDialog } from "@/components/app/ImageFormDialog";
+import { CsvPlatformDialog } from "@/components/app/CsvPlatformDialog";
 import { EmptyState } from "@/components/app/EmptyState";
 import { useList, useSessionOptions } from "@/hooks/use-list";
 import { useCsvSelection } from "@/hooks/use-csv-selection";
 import { api } from "@/lib/api";
-import { buildAdobeStockCsv, downloadCsvFile } from "@/lib/csv";
 import { IMAGE_SORTS, CATEGORIES, QUALITIES } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { SelectionBar } from "@/components/app/SelectionBar";
@@ -27,7 +27,7 @@ export default function ImagesPage() {
   const list = useList((p) => api.images.list(p));
   const sessionOptions = useSessionOptions();
   const csvSel = useCsvSelection();
-  const [csvBuilding, setCsvBuilding] = useState(false);
+  const [csvDialogOpen, setCsvDialogOpen] = useState(false);
 
   const [detail, setDetail] = useState<StockImage | null>(null);
   const [editing, setEditing] = useState<StockImage | null>(null);
@@ -52,10 +52,10 @@ export default function ImagesPage() {
       ],
     },
     {
-      key: "used_in_adobe_stock",
+      key: "used",
       label: "Usage",
       options: [
-        { value: "true", label: "Used" },
+        { value: "true", label: "Used (any platform)" },
         { value: "false", label: "Not used" },
       ],
     },
@@ -74,16 +74,28 @@ export default function ImagesPage() {
     setDetail(images.find((i) => i._id === image._id) || image);
   }
 
+  /** Quick stamp: not used anywhere → mark Adobe Stock (the primary);
+   *  used somewhere → clear every platform. Open the image for per-platform
+   *  stamps. */
   async function toggleUsed(image: StockImage) {
-    const next = !image.used_in_adobe_stock;
-    if (detail?._id === image._id) setDetail({ ...detail, used_in_adobe_stock: next });
-    list.patchLocal(image._id, { used_in_adobe_stock: next });
-    if (next) setThunk((t) => t + 1);
+    const anyNow = (image.used_count ?? 0) > 0 || Object.values(image.used ?? {}).some(Boolean);
+    const usedNext = anyNow
+      ? { adobe_stock: false, shutterstock: false, istock: false, wirestock: false, pond5: false, depositphotos: false, "123rf": false, dreamstime: false }
+      : { ...(image.used ?? {}), adobe_stock: true };
+    const patch = {
+      used: usedNext,
+      used_in_adobe_stock: usedNext.adobe_stock === true,
+      used_count: Object.values(usedNext).filter(Boolean).length,
+    };
+    if (detail?._id === image._id) setDetail({ ...detail, ...patch });
+    list.patchLocal(image._id, patch);
+    if (patch.used_count > 0) setThunk((t) => t + 1);
     try {
-      await api.images.update(image._id, { used_in_adobe_stock: next });
+      await api.images.update(image._id, { used: usedNext });
     } catch {
-      list.patchLocal(image._id, { used_in_adobe_stock: !next });
-      if (detail?._id === image._id) setDetail({ ...detail, used_in_adobe_stock: !next });
+      const rollback = { used: image.used, used_in_adobe_stock: image.used_in_adobe_stock, used_count: image.used_count };
+      list.patchLocal(image._id, rollback);
+      if (detail?._id === image._id) setDetail({ ...detail, ...rollback });
       toast({ variant: "destructive", title: "Update failed", description: "The stamp was not applied." });
     }
   }
@@ -113,22 +125,10 @@ export default function ImagesPage() {
     }
   }
 
-  /** Build + download the metadata CSV for the selection
+  /** Open the platform picker — the CSV itself is built per platform
    *  (originals and/or upscaled variants — selection survives pagination). */
   function downloadCsv() {
-    setCsvBuilding(true);
-    try {
-      const { csv, rows, warnings } = buildAdobeStockCsv(csvSel.list);
-      downloadCsvFile(csv, `adobe-stock-upload-${new Date().toISOString().slice(0, 10)}.csv`);
-      toast({
-        title: "CSV downloaded",
-        description: warnings.length
-          ? `${rows} row(s). ⚠ ${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}`
-          : `${rows} row(s) — upload the images first, then this CSV.`,
-      });
-    } finally {
-      setCsvBuilding(false);
-    }
+    setCsvDialogOpen(true);
   }
 
   const hasFilters = list.params.search || Object.values(list.params.filters).some(Boolean);
@@ -217,11 +217,16 @@ export default function ImagesPage() {
 
         <SelectionBar
           count={csvSel.count}
-          disabled={csvBuilding}
           onDownload={downloadCsv}
           onClear={csvSel.clear}
         />
       </main>
+
+      <CsvPlatformDialog
+        open={csvDialogOpen}
+        onOpenChange={setCsvDialogOpen}
+        items={csvSel.list}
+      />
 
       <ImageDetailDialog
         image={detail}

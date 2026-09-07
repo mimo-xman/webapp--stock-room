@@ -1,8 +1,25 @@
 /**
  * Zod schemas — request payloads (write operations).
+ *
+ * Multi-platform metadata: every image stores its upload metadata for EACH
+ * stock platform under metadata.<platform_id>. Only the Adobe Stock block is
+ * required on create (the historical primary market); the other platforms are
+ * optional and auto-derived from it when absent (see
+ * utils/derivePlatformMetadata.js — the generation agent is instructed to
+ * write the real per-platform values itself).
  */
 const { z } = require('zod');
-const { ADOBE_CATEGORIES, MONGODB_OBJECT_ID_RE } = require('./constants');
+const {
+  ADOBE_CATEGORIES,
+  SHUTTERSTOCK_CATEGORIES,
+  ETSY_PRODUCT_TYPES,
+  ETSY_TITLE_MAX,
+  ETSY_TAGS_MAX,
+  ETSY_TAG_MAX_LEN,
+  ETSY_PRICE_MIN,
+  MONGODB_OBJECT_ID_RE,
+  STOCK_PLATFORM_IDS,
+} = require('./constants');
 
 const objectId = z
   .string()
@@ -15,11 +32,12 @@ const ratio = z
 
 const keyword = z.string().trim().min(1, 'keyword cannot be empty').max(60);
 
-const keywords = z
-  .array(keyword)
-  .min(3, 'at least 3 keywords are required')
-  .max(50, 'at most 50 keywords are allowed (Adobe Stock limit)')
-  .transform((ks) => [...new Set(ks)]); // dedupe, keep order
+const keywords = (min, max, platform) =>
+  z
+    .array(keyword)
+    .min(min, `at least ${min} keywords are required (${platform} minimum)`)
+    .max(max, `at most ${max} keywords are allowed (${platform} limit)`)
+    .transform((ks) => [...new Set(ks)]); // dedupe, keep order
 
 const httpUrl = z
   .string()
@@ -27,6 +45,108 @@ const httpUrl = z
   .url('image_link must be a valid URL')
   .max(2048)
   .regex(/^https?:\/\//, 'image_link must be an http(s) URL');
+
+// ── per-platform metadata blocks ────────────────────────────────────────────
+
+const adobeStockMeta = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(3, 'title must be at least 3 characters')
+    .max(200, 'title must be at most 200 characters (Adobe Stock limit)'),
+  category: z.enum(ADOBE_CATEGORIES, {
+    errorMap: () => ({
+      message: `category must be exactly one of the ${ADOBE_CATEGORIES.length} Adobe Stock categories`,
+    }),
+  }),
+  keywords: keywords(3, 49, 'Adobe Stock'),
+});
+
+const shutterstockMeta = z.object({
+  description: z
+    .string()
+    .trim()
+    .min(5, 'description must be at least 5 characters')
+    .max(200, 'description must be at most 200 characters (Shutterstock limit)'),
+  categories: z
+    .array(z.enum(SHUTTERSTOCK_CATEGORIES))
+    .min(1, 'at least 1 Shutterstock category is required')
+    .max(2, 'at most 2 Shutterstock categories are allowed')
+    .transform((cs) => [...new Set(cs)]),
+  keywords: keywords(7, 50, 'Shutterstock'),
+});
+
+const istockMeta = z.object({
+  title: z.string().trim().min(3).max(120),
+  description: z.string().trim().min(5).max(2000),
+  keywords: keywords(1, 50, 'iStock'),
+});
+
+const wirestockMeta = z.object({
+  title: z.string().trim().min(3).max(200),
+  description: z.string().trim().min(5).max(1000),
+  keywords: keywords(5, 50, 'Wirestock'),
+});
+
+const pond5Meta = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(3, 'title must be at least 3 characters')
+    .max(80, 'title must be at most 80 characters (Pond5 limit)'),
+  description: z.string().trim().max(1000).optional().default(''),
+  keywords: keywords(5, 50, 'Pond5'),
+  price: z.number().positive('price must be a positive USD amount').optional(),
+});
+
+const depositphotosMeta = z.object({
+  description: z
+    .string()
+    .trim()
+    .min(5, 'description must be at least 5 characters')
+    .max(250, 'description must be at most 250 characters (Depositphotos limit)'),
+  keywords: keywords(8, 50, 'Depositphotos'),
+});
+
+const rf123Meta = z.object({
+  description: z
+    .string()
+    .trim()
+    .min(5, 'description must be at least 5 characters')
+    .max(180, 'description must be at most 180 characters (123RF limit)'),
+  keywords: keywords(7, 50, '123RF'),
+});
+
+const dreamstimeMeta = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(5, 'title must be at least 5 characters')
+    .max(250, 'title must be at most 250 characters (Dreamstime limit)'),
+  description: z.string().trim().max(2000).optional().default(''),
+  keywords: keywords(7, 50, 'Dreamstime'),
+});
+
+const PLATFORM_META_SCHEMAS = {
+  adobe_stock: adobeStockMeta,
+  shutterstock: shutterstockMeta,
+  istock: istockMeta,
+  wirestock: wirestockMeta,
+  pond5: pond5Meta,
+  depositphotos: depositphotosMeta,
+  '123rf': rf123Meta,
+  dreamstime: dreamstimeMeta,
+};
+
+/** metadata object: each present platform block must be valid; the platform
+ *  key must be one of the known ids (typo guard). */
+const metadataSchema = z
+  .object(
+    Object.fromEntries(
+      STOCK_PLATFORM_IDS.map((id) => [id, PLATFORM_META_SCHEMAS[id].optional()])
+    )
+  )
+  .strict(); // unknown platform keys → error
 
 // ── auth ──
 const verifySchema = z.object({
@@ -42,28 +162,38 @@ const sessionCreateSchema = z.object({
     .max(120, 'title must be at most 120 characters'),
 });
 
-// ── images ──
-const imageCreateSchema = z.object({
-  session_id: objectId,
-  prompt: z.string().trim().min(1, 'prompt is required').max(2000),
-  ratio,
-  quality: z.enum(['1K', '2K', '4K'], {
-    errorMap: () => ({ message: 'quality must be one of: 1K, 2K, 4K' }),
-  }),
-  image_link: httpUrl,
-  title: z
-    .string()
-    .trim()
-    .min(3, 'title must be at least 3 characters')
-    .max(200, 'title must be at most 200 characters (Adobe Stock limit)'),
-  category: z.enum(ADOBE_CATEGORIES, {
-    errorMap: () => ({
-      message: `category must be exactly one of the ${ADOBE_CATEGORIES.length} Adobe Stock categories`,
+// ── images (new multi-platform shape + legacy flat fields) ──
+const imageCreateSchema = z
+  .object({
+    session_id: objectId,
+    prompt: z.string().trim().min(1, 'prompt is required').max(2000),
+    ratio,
+    quality: z.enum(['1K', '2K', '4K'], {
+      errorMap: () => ({ message: 'quality must be one of: 1K, 2K, 4K' }),
     }),
-  }),
-  keywords,
-  used_in_adobe_stock: z.boolean().optional().default(false),
-});
+    image_link: httpUrl,
+    metadata: metadataSchema.optional(),
+    // legacy flat fields (pre-multiplatform agents/forms) — mapped onto
+    // metadata.adobe_stock by the controller when metadata is absent
+    title: z.string().trim().min(3).max(200).optional(),
+    category: z.enum(ADOBE_CATEGORIES).optional(),
+    keywords: keywords(3, 50, 'legacy flat').optional(),
+    // per-platform published flags (default false everywhere)
+    used: z
+      .object(
+        Object.fromEntries(STOCK_PLATFORM_IDS.map((id) => [id, z.boolean().optional()]))
+      )
+      .optional(),
+    used_in_adobe_stock: z.boolean().optional(), // legacy alias for used.adobe_stock
+  })
+  .refine(
+    (v) => v.metadata?.adobe_stock || (v.title && v.category && v.keywords),
+    {
+      message:
+        'provide either metadata.adobe_stock {title, category, keywords} or the legacy flat title/category/keywords fields',
+      path: ['metadata'],
+    }
+  );
 
 const imageUpdateSchema = z
   .object({
@@ -72,10 +202,18 @@ const imageUpdateSchema = z
     ratio,
     quality: z.enum(['1K', '2K', '4K']),
     image_link: httpUrl,
-    title: z.string().trim().min(3).max(200),
-    category: z.enum(ADOBE_CATEGORIES),
-    keywords,
-    used_in_adobe_stock: z.boolean(),
+    metadata: metadataSchema.partial().optional(), // patch platform blocks wholesale
+    used: z
+      .object(
+        Object.fromEntries(STOCK_PLATFORM_IDS.map((id) => [id, z.boolean().optional()]))
+      )
+      .optional(),
+    used_in_adobe_stock: z.boolean().optional(), // legacy alias
+    // legacy flat fields (pre-multiplatform clients) — merged onto
+    // metadata.adobe_stock by the controller
+    title: z.string().trim().min(3).max(200).optional(),
+    category: z.enum(ADOBE_CATEGORIES).optional(),
+    keywords: keywords(3, 50, 'legacy flat').optional(),
     // Batch-worker coordination (webapp "Active/Paused" toggle + error dismissal).
     active: z.boolean(),
     error_message: z.string().trim().max(2000, 'error_message must be at most 2000 characters'),
@@ -163,6 +301,87 @@ const upscaleUpdateSchema = z
     message: 'provide at least one field to update',
   });
 
+// ── Etsy products ───────────────────────────────────────────────────────────
+
+const etsyProductImageSchema = z.object({
+  image_link: httpUrl,
+  role: z.enum(['cover', 'page', 'asset', 'preview']).optional().default('page'),
+  caption: z.string().trim().max(200).optional().default(''),
+  prompt: z.string().trim().max(2000).optional().default(''),
+  ratio: z.string().trim().max(12).optional().default(''),
+  quality: z.enum(['1K', '2K', '4K']).optional(),
+});
+
+const etsyTags = z
+  .array(
+    z
+      .string()
+      .trim()
+      .min(1, 'tag cannot be empty')
+      .max(ETSY_TAG_MAX_LEN, `each Etsy tag must be at most ${ETSY_TAG_MAX_LEN} characters`)
+  )
+  .max(ETSY_TAGS_MAX, `Etsy allows at most ${ETSY_TAGS_MAX} tags`)
+  .transform((ts) => [...new Set(ts.map((t) => t.toLowerCase()))]);
+
+const etsyMetadataSchema = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(3, 'title must be at least 3 characters')
+    .max(ETSY_TITLE_MAX, `title must be at most ${ETSY_TITLE_MAX} characters (Etsy limit)`),
+  description: z.string().trim().min(10, 'description must be at least 10 characters').max(20000),
+  tags: etsyTags.optional().default([]),
+  category: z
+    .string()
+    .trim()
+    .max(200, 'category (Etsy taxonomy path) must be at most 200 characters')
+    .optional()
+    .default(''),
+  price: z
+    .number({ invalid_type_error: 'price must be a number (USD)' })
+    .min(ETSY_PRICE_MIN, `Etsy minimum listing price is $${ETSY_PRICE_MIN}`)
+    .optional(),
+});
+
+const etsyProductCreateSchema = z
+  .object({
+    session_id: objectId,
+    product_type: z.enum(ETSY_PRODUCT_TYPES).optional().default('digital_download'),
+    images: z.array(etsyProductImageSchema).min(1, 'at least one image is required').max(200),
+    metadata: etsyMetadataSchema,
+    file_link: httpUrl.optional().default(''),
+    used_in_etsy: z.boolean().optional().default(false),
+  })
+  .refine((v) => !v.file_link || v.file_link !== '', {
+    message: 'file_link must be an http(s) URL when provided',
+    path: ['file_link'],
+  });
+
+const etsyProductUpdateSchema = z
+  .object({
+    session_id: objectId,
+    product_type: z.enum(ETSY_PRODUCT_TYPES),
+    images: z.array(etsyProductImageSchema).min(1).max(200),
+    metadata: etsyMetadataSchema.partial(),
+    file_link: z.union([httpUrl, z.literal('')]),
+    used_in_etsy: z.boolean(),
+  })
+  .partial()
+  .refine((obj) => Object.keys(obj).length > 0, {
+    message: 'provide at least one field to update',
+  });
+
+// POST /api/etsy-products/:id/images — append ONE image (a finished page)
+// to an existing product (the agent builds its book page by page).
+const etsyProductAddImageSchema = z.object({
+  image_link: httpUrl,
+  role: z.enum(['cover', 'page', 'asset', 'preview']).optional().default('page'),
+  caption: z.string().trim().max(200).optional().default(''),
+  prompt: z.string().trim().max(2000).optional().default(''),
+  ratio: z.string().trim().max(12).optional().default(''),
+  quality: z.enum(['1K', '2K', '4K']).optional(),
+});
+
 module.exports = {
   verifySchema,
   sessionCreateSchema,
@@ -172,4 +391,7 @@ module.exports = {
   imageReleaseSchema,
   upscaleCreateSchema,
   upscaleUpdateSchema,
+  etsyProductCreateSchema,
+  etsyProductUpdateSchema,
+  etsyProductAddImageSchema,
 };

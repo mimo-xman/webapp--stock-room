@@ -1,11 +1,28 @@
 /**
  * Image controller — CRUD + advanced listing + download proxy + upscales.
+ *
+ * The images live in the `images_to_bay` collection (ImageToBay model) with
+ * per-platform metadata + per-platform used flags. Legacy flat writes
+ * (title/category/keywords/used_in_adobe_stock) are mapped onto
+ * metadata.adobe_stock / used.adobe_stock, and list/get responses expose flat
+ * legacy projections derived from the new structure, so the webapp and older
+ * agent prompts keep working during the transition.
  */
 const { Readable } = require('node:stream');
-const Image = require('../models/Image');
+const Image = require('../models/ImageToBay');
 const Session = require('../models/Session');
 const { CONFIG } = require('../config');
-const { IMAGE_SORT_FIELDS, ADOBE_CATEGORIES, MONGODB_OBJECT_ID_RE, UPSCALE_HARD_MAX, IMAGES_ALL_MAX, CLAIM_STALE_DEFAULT_MINUTES } = require('../constants');
+const {
+  IMAGE_SORT_FIELDS,
+  ADOBE_CATEGORIES,
+  SHUTTERSTOCK_CATEGORIES,
+  MONGODB_OBJECT_ID_RE,
+  UPSCALE_HARD_MAX,
+  IMAGES_ALL_MAX,
+  CLAIM_STALE_DEFAULT_MINUTES,
+  STOCK_PLATFORM_IDS,
+} = require('../constants');
+const { derivePlatformMetadata, emptyUsed, usedCount } = require('../utils/derivePlatformMetadata');
 const {
   escapeRegex,
   parseCommonQuery,
@@ -26,15 +43,12 @@ function badRequest(res, problems) {
 }
 
 function toPlain(doc) {
-  const o = doc.toObject ? doc.toObject() : doc;
-  return {
-    ...o,
-    _id: String(o._id),
-    session_id: String(o.session_id),
-  };
+  return Image.plain(doc);
 }
 
-/** Parse image-specific filters (session_id, category, used, quality, ratio, upscales). */
+/** Parse image-specific filters.
+ *  session_id, category (adobe), platform metadata presence, used (any or
+ *  per-platform), quality, ratio, upscales. */
 function parseImageFilters(query) {
   const problems = [];
   const filters = {};
@@ -49,14 +63,58 @@ function parseImageFilters(query) {
     }
   }
 
+  // category → metadata.adobe_stock.category (legacy flat filter)
   const f2 = exactFilter(query.category, 'category', ADOBE_CATEGORIES);
   if (f2.problem) problems.push(f2.problem);
-  else if (f2.value !== undefined) filters.category = f2.value;
+  else if (f2.value !== undefined) filters['metadata.adobe_stock.category'] = f2.value;
 
-  if (query.used_in_adobe_stock !== undefined && query.used_in_adobe_stock !== '') {
+  // platform=shutterstock → images that carry metadata for that platform
+  if (query.platform !== undefined && query.platform !== '') {
+    if (STOCK_PLATFORM_IDS.includes(query.platform)) {
+      const key = `metadata.${query.platform}`;
+      filters[key] = { $exists: true, $ne: null };
+    } else {
+      problems.push({
+        path: 'platform',
+        message: `platform must be one of: ${STOCK_PLATFORM_IDS.join(', ')}`,
+      });
+    }
+  }
+
+  // used=true|false → used on ANY platform (used_count > 0 / == 0).
+  // used=<platform> is NOT supported — use platform+used combos via
+  // `used_platform` below for per-platform used filters.
+  if (query.used !== undefined && query.used !== '') {
+    const v = String(query.used).toLowerCase();
+    if (v === 'true') filters.used_count = { $gt: 0 };
+    else if (v === 'false') filters.used_count = { $eq: 0 };
+    else problems.push({ path: 'used', message: 'used must be "true" or "false"' });
+  }
+
+  // used_platform=adobe_stock&used_platform_value=true|false — per-platform.
+  if (query.used_platform !== undefined && query.used_platform !== '') {
+    if (STOCK_PLATFORM_IDS.includes(query.used_platform)) {
+      const v = String(query.used_platform_value || 'true').toLowerCase();
+      if (v === 'true' || v === 'false') {
+        filters[`used.${query.used_platform}`] = v === 'true';
+      } else {
+        problems.push({ path: 'used_platform_value', message: 'used_platform_value must be "true" or "false"' });
+      }
+    } else {
+      problems.push({
+        path: 'used_platform',
+        message: `used_platform must be one of: ${STOCK_PLATFORM_IDS.join(', ')}`,
+      });
+    }
+  }
+
+  // legacy wire name — maps to used.adobe_stock exactly (historical
+  // behavior of the filter kept for old clients)
+  if (query.used_in_adobe_stock !== undefined && query.used_in_adobe_stock !== '' &&
+      query.used === undefined) {
     const v = String(query.used_in_adobe_stock).toLowerCase();
-    if (v === 'true') filters.used_in_adobe_stock = true;
-    else if (v === 'false') filters.used_in_adobe_stock = false;
+    if (v === 'true') filters['used.adobe_stock'] = true;
+    else if (v === 'false') filters['used.adobe_stock'] = { $ne: true };
     else problems.push({ path: 'used_in_adobe_stock', message: 'used_in_adobe_stock must be "true" or "false"' });
   }
 
@@ -128,7 +186,20 @@ async function list(req, res, next) {
     const match = { ...filters };
     if (search) {
       const re = { $regex: escapeRegex(search), $options: 'i' };
-      match.$or = [{ title: re }, { prompt: re }, { category: re }, { keywords: re }];
+      match.$or = [
+        { 'metadata.adobe_stock.title': re },
+        { 'metadata.shutterstock.description': re },
+        { 'metadata.istock.title': re },
+        { 'metadata.wirestock.title': re },
+        { 'metadata.pond5.title': re },
+        { 'metadata.depositphotos.description': re },
+        { 'metadata.123rf.description': re },
+        { 'metadata.dreamstime.title': re },
+        { prompt: re },
+        { 'metadata.adobe_stock.category': re },
+        { 'metadata.adobe_stock.keywords': re },
+        { 'metadata.shutterstock.keywords': re },
+      ];
     }
     if (from || to) {
       match.createdAt = {};
@@ -137,20 +208,27 @@ async function list(req, res, next) {
     }
 
     const dir = order === 'asc' ? 1 : -1;
-    const stringSort = ['title', 'prompt', 'category', 'ratio'].includes(sort);
+    // "used" sorts on the used_count mirror; "title"/"category" sort on the
+    // Adobe-first projection (the display fields).
+    const sortKeyMap = {
+      title: 'metadata.adobe_stock.title',
+      category: 'metadata.adobe_stock.category',
+      used: 'used_count',
+    };
+    const sortKey = sortKeyMap[sort] || sort;
+    const stringSort = ['title', 'prompt', 'category', 'ratio', 'metadata.adobe_stock.title', 'metadata.adobe_stock.category'].includes(sortKey);
     const collation = stringSort ? { locale: 'en', strength: 2 } : undefined;
 
-    let q = Image.find(match).sort({ [sort]: dir, _id: dir }).skip(skip).limit(limit);
+    let q = Image.find(match).sort({ [sortKey]: dir, _id: dir }).skip(skip).limit(limit);
     if (collation) q = q.collation(collation);
 
     const [docs, total] = await Promise.all([q.lean(), Image.countDocuments(match)]);
 
     res.json({
-      data: docs.map((d) => ({
-        ...d,
-        _id: String(d._id),
-        session_id: String(d.session_id),
-      })),
+      data: docs.map((d) => {
+        const plain = Image.plain(d);
+        return plain;
+      }),
       pagination: paginationMeta({ page, limit, total }),
     });
   } catch (err) {
@@ -165,7 +243,49 @@ async function create(req, res, next) {
     if (!session) {
       throw new HttpError(404, 'SESSION_NOT_FOUND', `Session ${payload.session_id} does not exist — create the session first`);
     }
-    const image = await Image.create(payload);
+
+    // Normalize: legacy flat fields → metadata.adobe_stock; derive missing
+    // platforms; merge the explicit per-platform blocks on top.
+    const provided = payload.metadata || {};
+    const adobe =
+      provided.adobe_stock ||
+      (payload.title && payload.category && payload.keywords
+        ? { title: payload.title, category: payload.category, keywords: payload.keywords }
+        : null);
+    if (!adobe) {
+      return badRequest(res, [
+        { path: 'metadata.adobe_stock', message: 'metadata.adobe_stock (or legacy flat title/category/keywords) is required' },
+      ]);
+    }
+    const derived = derivePlatformMetadata(adobe);
+    // explicit per-platform blocks win over the derived defaults
+    const metadata = {};
+    for (const id of STOCK_PLATFORM_IDS) {
+      metadata[id] = provided[id] !== undefined ? provided[id] : derived[id];
+    }
+
+    // used flags: explicit values win, else legacy alias, else false
+    const used = emptyUsed();
+    if (payload.used) {
+      for (const id of STOCK_PLATFORM_IDS) {
+        if (typeof payload.used[id] === 'boolean') used[id] = payload.used[id];
+      }
+    }
+    if (typeof payload.used_in_adobe_stock === 'boolean' &&
+        (!payload.used || payload.used.adobe_stock === undefined)) {
+      used.adobe_stock = payload.used_in_adobe_stock;
+    }
+
+    const image = await Image.create({
+      session_id: payload.session_id,
+      prompt: payload.prompt,
+      ratio: payload.ratio,
+      quality: payload.quality,
+      image_link: payload.image_link,
+      metadata,
+      used,
+      used_count: usedCount(used),
+    });
     res.status(201).json({ data: toPlain(image) });
   } catch (err) {
     next(err);
@@ -180,7 +300,7 @@ async function create(req, res, next) {
  * EVERY image in one response — the generation agent calls it BEFORE
  * preparing a batch to avoid producing near-duplicates (same subject +
  * same composition) of what is already stored. Lean projection by default
- * (title, category, keywords, prompt…); `with_links=1` also returns
+ * (per-platform titles/keywords, prompt…); `with_links=1` also returns
  * image_link + the upscales array. Newest first; hard-capped at
  * IMAGES_ALL_MAX with an explicit `truncated` flag.
  */
@@ -190,13 +310,12 @@ async function listAll(req, res, next) {
 
     const projection = {
       session_id: 1,
-      title: 1,
-      category: 1,
-      keywords: 1,
+      metadata: 1,
+      used: 1,
+      used_count: 1,
       prompt: 1,
       ratio: 1,
       quality: 1,
-      used_in_adobe_stock: 1,
       createdAt: 1,
       updatedAt: 1,
     };
@@ -212,11 +331,10 @@ async function listAll(req, res, next) {
       .lean();
 
     const truncated = docs.length > IMAGES_ALL_MAX;
-    const data = docs.slice(0, IMAGES_ALL_MAX).map((d) => ({
-      ...d,
-      _id: String(d._id),
-      session_id: String(d.session_id),
-    }));
+    const data = docs.slice(0, IMAGES_ALL_MAX).map((d) => {
+      const plain = Image.plain(d);
+      return plain;
+    });
 
     res.json({
       data,
@@ -237,9 +355,7 @@ async function getOne(req, res, next) {
     if (!image) {
       throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
     }
-    res.json({
-      data: { ...image, _id: String(image._id), session_id: String(image.session_id) },
-    });
+    res.json({ data: toPlain(image) });
   } catch (err) {
     next(err);
   }
@@ -247,13 +363,55 @@ async function getOne(req, res, next) {
 
 async function update(req, res, next) {
   try {
-    const patch = req.validated;
+    const patch = { ...req.validated };
+
+    // legacy flat fields → metadata.adobe_stock (merged with the stored block)
+    if (patch.title || patch.category || patch.keywords) {
+      const current = await Image.findById(req.params.id).lean();
+      if (!current) {
+        throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
+      }
+      const existing = (current.metadata && current.metadata.adobe_stock) || {};
+      patch.metadata = {
+        ...(patch.metadata || {}),
+        adobe_stock: {
+          title: patch.title !== undefined ? patch.title : existing.title,
+          category: patch.category !== undefined ? patch.category : existing.category,
+          keywords: patch.keywords !== undefined ? patch.keywords : existing.keywords,
+        },
+      };
+      delete patch.title;
+      delete patch.category;
+      delete patch.keywords;
+    }
+
+    // used: merge the patch onto the stored flags + refresh the mirror
+    if (patch.used || patch.used_in_adobe_stock !== undefined) {
+      const current = await Image.findById(req.params.id).lean();
+      if (!current) {
+        throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
+      }
+      const used = { ...emptyUsed(), ...(current.used || {}) };
+      if (patch.used) {
+        for (const id of STOCK_PLATFORM_IDS) {
+          if (typeof patch.used[id] === 'boolean') used[id] = patch.used[id];
+        }
+      }
+      if (typeof patch.used_in_adobe_stock === 'boolean') {
+        used.adobe_stock = patch.used_in_adobe_stock;
+      }
+      patch.used = used;
+      patch.used_count = usedCount(used);
+      delete patch.used_in_adobe_stock;
+    }
+
     if (patch.session_id) {
       const session = await Session.findById(patch.session_id);
       if (!session) {
         throw new HttpError(404, 'SESSION_NOT_FOUND', `Session ${patch.session_id} does not exist`);
       }
     }
+
     const image = await Image.findByIdAndUpdate(req.params.id, patch, {
       new: true,
       runValidators: true,
@@ -325,7 +483,7 @@ async function claim(req, res, next) {
       return res.json({ data: null, claimed: false, max_upscales: effectiveMax });
     }
     res.json({
-      data: { ...doc, _id: String(doc._id), session_id: String(doc.session_id) },
+      data: toPlain(doc),
       claimed: true,
       max_upscales: effectiveMax,
     });
@@ -391,6 +549,18 @@ function slugify(title) {
   return s || 'image';
 }
 
+function displayTitle(image) {
+  const md = image.metadata || {};
+  return (
+    (md.adobe_stock && md.adobe_stock.title) ||
+    (md.shutterstock && md.shutterstock.description) ||
+    (md.istock && md.istock.title) ||
+    (md.wirestock && md.wirestock.title) ||
+    (md.dreamstime && md.dreamstime.title) ||
+    'image'
+  );
+}
+
 async function download(req, res, next) {
   try {
     const image = await Image.findById(req.params.id);
@@ -427,7 +597,7 @@ async function download(req, res, next) {
 
     const type = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
     const ext = EXT_BY_TYPE[type] || (image.image_link.split('.').pop() || 'png').toLowerCase().slice(0, 5);
-    const filename = `${slugify(image.title)}_${image._id}.${ext}`;
+    const filename = `${slugify(displayTitle(image))}_${image._id}.${ext}`;
 
     res.setHeader('Content-Type', type || 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -478,7 +648,7 @@ async function addUpscale(req, res, next) {
       throw new HttpError(
         409,
         'UPSCALE_LIMIT_REACHED',
-        `Image ${image._id} ("${image.title}") already has ${current} upscale${current === 1 ? '' : 's'} — ` +
+        `Image ${image._id} ("${displayTitle(image)}") already has ${current} upscale${current === 1 ? '' : 's'} — ` +
           `the limit for this operation is ${effectiveMax}. ` +
           'Delete an existing upscale first, or raise the limit (secret MAX_NUMBER_OF_UPSCALES_PER_IMAGE / input max_upscales).'
       );
@@ -617,7 +787,7 @@ async function downloadUpscale(req, res, next) {
 
     const type = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
     const ext = EXT_BY_TYPE[type] || (upscale.url.split('.').pop() || 'png').toLowerCase().slice(0, 5);
-    const filename = `${slugify(image.title)}_${image._id}_x${upscale.scale}.${ext}`;
+    const filename = `${slugify(displayTitle(image))}_${image._id}_x${upscale.scale}.${ext}`;
 
     res.setHeader('Content-Type', type || 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

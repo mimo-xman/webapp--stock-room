@@ -10,9 +10,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ListParams, ListResponse, Pagination } from "@/lib/types";
 import { DEFAULT_LIST_PARAMS } from "@/lib/types";
 import { api } from "@/lib/api";
-import type { Session, StockImage } from "@/lib/types";
+import type { Session, StockImage, EtsyProduct } from "@/lib/types";
 
-type Fetcher = (params: ListParams) => Promise<ListResponse<Session | StockImage>>;
+type Fetcher = (params: ListParams) => Promise<ListResponse<Session | StockImage | EtsyProduct>>;
 
 export function useList(fetcher: Fetcher, initial?: Partial<ListParams>) {
   const [params, setParams] = useState<ListParams>({
@@ -20,7 +20,7 @@ export function useList(fetcher: Fetcher, initial?: Partial<ListParams>) {
     ...initial,
     filters: { ...(initial?.filters ?? {}) },
   });
-  const [items, setItems] = useState<(Session | StockImage)[]>([]);
+  const [items, setItems] = useState<(Session | StockImage | EtsyProduct)[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +95,7 @@ export function useList(fetcher: Fetcher, initial?: Partial<ListParams>) {
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
   /** Optimistic local patch (e.g. stamp toggle) — reload to confirm. */
-  const patchLocal = useCallback((id: string, patch: Partial<StockImage>) => {
+  const patchLocal = useCallback((id: string, patch: Record<string, unknown>) => {
     setItems((prev) => prev.map((it) => (it._id === id ? { ...it, ...patch } : it)));
   }, []);
 

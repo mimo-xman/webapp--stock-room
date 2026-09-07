@@ -7,10 +7,23 @@ const { dbState } = require('../db');
 const { requireAuth, badAuthGuard } = require('../middleware/auth');
 const { generalLimiter, authLimiter } = require('../middleware/rateLimit');
 const { validate } = require('../middleware/validate');
-const { verifySchema, sessionCreateSchema, imageCreateSchema, imageUpdateSchema, imageClaimSchema, imageReleaseSchema, upscaleCreateSchema, upscaleUpdateSchema } = require('../schemas');
+const {
+  verifySchema,
+  sessionCreateSchema,
+  imageCreateSchema,
+  imageUpdateSchema,
+  imageClaimSchema,
+  imageReleaseSchema,
+  upscaleCreateSchema,
+  upscaleUpdateSchema,
+  etsyProductCreateSchema,
+  etsyProductUpdateSchema,
+  etsyProductAddImageSchema,
+} = require('../schemas');
 const authController = require('../controllers/authController');
 const sessionController = require('../controllers/sessionController');
 const imageController = require('../controllers/imageController');
+const etsyProductController = require('../controllers/etsyProductController');
 const docsHtml = require('./docs');
 
 const router = express.Router();
@@ -24,7 +37,7 @@ router.get('/', (req, res) => {
 router.get('/health', (req, res) => {
   res.json({
     success: true,
-    service: 'adobe-stock-images-generator-api',
+    service: 'stock-room-api',
     version: CONFIG.VERSION,
     status: dbState() === 'up' ? 'ok' : 'degraded',
     db: dbState(),
@@ -48,7 +61,7 @@ router.post('/api/sessions', validate(sessionCreateSchema), sessionController.cr
 router.get('/api/sessions/:id', sessionController.getOne);
 router.delete('/api/sessions/:id', sessionController.remove);
 
-// images
+// images (multi-platform: collection images_to_bay, per-platform metadata)
 router.get('/api/images', imageController.list);
 router.post('/api/images', validate(imageCreateSchema), imageController.create);
 // NOTE: /api/images/all and /api/images/claim MUST stay ABOVE
@@ -69,5 +82,13 @@ router.post('/api/images/:id/upscales', validate(upscaleCreateSchema), imageCont
 router.patch('/api/images/:id/upscales/:upscaleId', validate(upscaleUpdateSchema), imageController.updateUpscale);
 router.delete('/api/images/:id/upscales/:upscaleId', imageController.removeUpscale);
 router.get('/api/images/:id/upscales/:upscaleId/download', imageController.downloadUpscale);
+
+// etsy products (digital products sold on Etsy: coloring books, invitations…)
+router.get('/api/etsy-products', etsyProductController.list);
+router.post('/api/etsy-products', validate(etsyProductCreateSchema), etsyProductController.create);
+router.get('/api/etsy-products/:id', etsyProductController.getOne);
+router.patch('/api/etsy-products/:id', validate(etsyProductUpdateSchema), etsyProductController.update);
+router.post('/api/etsy-products/:id/images', validate(etsyProductAddImageSchema), etsyProductController.addImage);
+router.delete('/api/etsy-products/:id', etsyProductController.remove);
 
 module.exports = router;

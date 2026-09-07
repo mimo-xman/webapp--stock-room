@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, Check, ImageOff, LoaderCircle, Power, Stamp, ZoomIn } from "lucide-react";
+import { AlertTriangle, Check, ImageOff, Layers, LoaderCircle, Power, Stamp, ZoomIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StampToggle } from "./StampToggle";
 import type { StockImage } from "@/lib/types";
@@ -14,6 +14,11 @@ interface ImageCardProps {
   /** CSV export selection for the ORIGINAL variant (undefined = feature off). */
   selected?: boolean;
   onToggleSelect?: (image: StockImage) => void;
+}
+
+/** Used on at least one marketplace (any-platform view of the used flags). */
+function anyUsed(image: StockImage): boolean {
+  return (image.used_count ?? 0) > 0 || Object.values(image.used ?? {}).some(Boolean);
 }
 
 export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected = false, onToggleSelect }: ImageCardProps) {
@@ -34,7 +39,7 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected 
       }}
       tabIndex={0}
       role="button"
-      aria-label={`Open ${image.title}`}
+      aria-label={`Open ${image.title || image.metadata?.adobe_stock?.title || "image"}`}
     >
       <div className="relative aspect-[4/3] overflow-hidden bg-muted">
         {broken ? (
@@ -45,12 +50,12 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected 
         ) : (
           <img
             src={image.image_link}
-            alt={image.title}
+            alt={image.title || "stock image"}
             loading="lazy"
             onError={() => setBroken(true)}
             className={cn(
               "h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]",
-              image.used_in_adobe_stock && "opacity-95",
+              anyUsed(image) && "opacity-95",
               image.active === false && "opacity-70 saturate-50"
             )}
           />
@@ -81,14 +86,14 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected 
           </span>
         )}
 
-        {image.used_in_adobe_stock && (
+        {anyUsed(image) && (
           <span key={thunkKey} className="stamp stamp-thunk pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[11px] sm:text-xs">
             Used · published
           </span>
         )}
 
         <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 max-md:opacity-100">
-          <StampToggle used={image.used_in_adobe_stock} onToggle={() => onToggleUsed(image)} />
+          <StampToggle used={anyUsed(image)} onToggle={() => onToggleUsed(image)} />
         </div>
 
         {onToggleSelect && (
@@ -96,7 +101,7 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected 
             type="button"
             role="checkbox"
             aria-checked={selected}
-            aria-label={`Select ${image.title} for the CSV export`}
+            aria-label={`Select ${image.title || "image"} for the CSV export`}
             title="Select for the CSV export"
             onClick={(e) => {
               e.stopPropagation();
@@ -117,11 +122,20 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected 
       </div>
 
       <div className="flex flex-1 flex-col gap-2 p-3">
-        <h3 className="line-clamp-2 text-sm font-medium leading-snug">{image.title}</h3>
+        <h3 className="line-clamp-2 text-sm font-medium leading-snug">{image.title || image.metadata?.adobe_stock?.title || "Untitled"}</h3>
         <div className="mt-auto flex flex-wrap items-center gap-1.5">
-          <span className="chip max-w-full truncate border-line-strong text-ink">{image.category}</span>
+          {image.category ? (
+            <span className="chip max-w-full truncate border-line-strong text-ink">{image.category}</span>
+          ) : null}
           <span className="chip">{image.quality}</span>
           <span className="chip">{image.ratio}</span>
+          <span
+            className="chip border-brand/60 text-brand"
+            title={`${Object.values(image.used ?? {}).filter(Boolean).length} platform(s) marked used — open the image for per-platform details`}
+          >
+            <Layers className="mr-0.5 h-3 w-3" aria-hidden />
+            {Object.values(image.used ?? {}).filter(Boolean).length || (image.metadata ? Object.keys(image.metadata).length : 0)}
+          </span>
           {(image.upscales?.length ?? 0) > 0 && (
             <span
               className="chip border-brand/60 text-brand"
@@ -143,7 +157,7 @@ export function ImageCard({ image, onOpen, onToggleUsed, thunkKey = 0, selected 
           )}
           <span className="ml-auto flex items-center gap-1 font-mono text-[10px] text-ink-muted">
             <Stamp className="h-3 w-3" aria-hidden />
-            {image.keywords.length}
+            {(image.metadata?.adobe_stock?.keywords ?? image.keywords ?? []).length}
           </span>
         </div>
       </div>

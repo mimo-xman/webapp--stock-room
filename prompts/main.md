@@ -305,23 +305,35 @@ Body: {
   "ratio":      "<aspectRatio you sent, e.g. 16:9>",
   "quality":    "<quality you sent: 1K | 2K | 4K>",
   "image_link": "<from STEP 4>",
-  "title":      "<short descriptive title>",
-  "category":   "<one of the 21 categories>",
-  "keywords":   ["<kw1>", "<kw2>", … ]
+  "metadata": {
+    "adobe_stock":    { "title": "<3-200 chars>", "category": "<one of the 21 categories>", "keywords": ["<kw1>", "<kw2>", …] },
+    "shutterstock":   { "description": "<5-200 chars>", "categories": ["<1-2 of the 26>", "…"], "keywords": [ … ] },
+    "istock":         { "title": "<3-120>", "description": "<full sentence>", "keywords": [ … ] },
+    "wirestock":      { "title": "<3-200>", "description": "<full sentence>", "keywords": [ … ] },
+    "pond5":          { "title": "<3-80 ASCII>", "description": "<text>", "keywords": [ … ], "price": <USD> },
+    "depositphotos":  { "description": "<5-250>", "keywords": [ … ] },
+    "123rf":          { "description": "<5-180>", "keywords": [ … ] },
+    "dreamstime":     { "title": "<5-250>", "description": "<text>", "keywords": [ … ] }
+  }
 }
 ```
 
 Metadata rules:
 
-- **title** — 3–200 characters, plain descriptive English, no keyword stuffing, no trailing
-  punctuation. Example: `Minimal ceramic pour-over coffee set on linen, top view`.
-- **category** — EXACTLY one value from the 21-category list in APPENDIX C (the Stock Room
-  taxonomy; pick the best fit for the image).
-- **keywords** — 25–49 keywords, comma-separated, ordered by relevance (most important first):
-  concrete subjects → composition/style → concepts/moods → use-cases. Single words or short
-  phrases, lowercase, no duplicates.
-- `keywords` is sent as a JSON array of 3–50 strings. Do not set `used_in_adobe_stock` — only
-  the owner marks images as used, from the webapp.
+- Every sellable image stores its upload metadata for EACH marketplace (see APPENDIX D of
+  the stock-platforms prompt for the full per-platform caps). If the mission is NOT headed
+  to the stock marketplaces, you may send the legacy flat fields instead — `title`
+  (3–200 chars, plain descriptive English), `category` (EXACTLY one value from the
+  21-category list in APPENDIX C), `keywords` (25–49, relevance-ordered, lowercase) — the
+  API stores them as `metadata.adobe_stock` and auto-derives the other platforms.
+- **Etsy product missions** (coloring books, invitations, printable sets…): do NOT use
+  `/api/images` — the mission bundles several images behind ONE Etsy listing. Use
+  `POST /api/etsy-products` (create the product with its images[] + listing metadata:
+  title ≤ 140, 13 tags ≤ 20 chars, category, price, description) and
+  `POST /api/etsy-products/:id/images` to append each new image. See the coloring-book
+  prompt for the full flow.
+- Do not set `used` flags — only the owner marks images as used per platform, from the
+  webapp.
 
 ## STEP 6 — Verify and report (do not skip)
 
@@ -392,21 +404,26 @@ Auth: header `X-API-Key: [STOCK ROOM API KEY]`.
 | `GET /api/sessions` | List sessions (page/limit/search/sort/order) |
 | `GET /api/sessions/:id` | Session + counts |
 | `DELETE /api/sessions/:id` | Delete session **and all its images** |
-| `POST /api/images` | Register an image (full metadata) |
-| `GET /api/images` | List/filter images (`session_id`, `category`, `used_in_adobe_stock`, `quality`, `has_upscales`, `search`, `sort`, `order`, `page`, `limit` ∈ 5/10/20/50/100) |
+| `POST /api/images` | Register an image with per-platform metadata (legacy flat fields accepted) |
+| `GET /api/images` | List/filter images (`session_id`, `category`, `platform`, `used`, `quality`, `has_upscales`, `search`, `sort`, `order`, `page`, `limit` ∈ 5/10/20/50/100) |
 | `GET /api/images/all` | **Every image in one call** — run this BEFORE generating (STEP 3) to avoid duplicates; `?with_links=1` also returns `image_link` + `upscales` |
 | `GET /api/images/:id` | One image (incl. `upscales[]`) |
 | `PATCH /api/images/:id` | Edit fields (owner marks `used_in_adobe_stock`) |
 | `DELETE /api/images/:id` | Delete one image |
 | `GET /api/images/:id/download` | Download the image file (proxied) |
+| `POST /api/etsy-products` | Create an Etsy product (images[] + one shared listing metadata block) — for bundled missions |
+| `POST /api/etsy-products/:id/images` | Append ONE image to an Etsy product |
+| `GET /api/etsy-products` | List Etsy products (`session_id`, `product_type`, `used_in_etsy`, …) |
 
 Note: images can gain `upscales[]` entries (Real-ESRGAN ×2/×4, uploaded to Cloudinary)
-from the daily GitHub Actions job — you never create them. `used_in_adobe_stock`
-on the image is the owner's "used on the destination platform" signal; each variant carries
-its own flag managed by the owner in the webapp.
+from the daily GitHub Actions job — you never create them. The per-platform `used`
+flags on the image (`used.adobe_stock`, `used.shutterstock`…) are the owner's
+"published there" signals, managed from the webapp.
 
-Validation highlights: `category` must be one of the 21 categories; `title` 3–200 chars;
-`keywords` 3–50 entries; `image_link` must be http(s); `session_id` must exist.
+Validation highlights: each `metadata.<platform>` block follows its platform's own
+caps (title/description lengths, keyword counts, category lists); legacy flat
+`title`/`category`/`keywords` are accepted and mapped onto `metadata.adobe_stock`;
+`image_link` must be http(s); `session_id` must exist.
 
 ## APPENDIX C — The 21 Stock Room categories (exact values)
 

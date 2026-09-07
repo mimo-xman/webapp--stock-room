@@ -2,11 +2,12 @@
 
 /**
  * Image detail dialog — large preview with Original/upscaled variant switch,
- * all the image metadata with quick copy icons, download, stamp toggle,
- * edit, delete. Upscaled variants (Real-ESRGAN via GitHub Actions) are
- * listed in the metadata column with per-variant mark-used / download /
- * delete actions. Optional looping prev/next navigation (arrows + ←/→ keys)
- * across the page's image list.
+ * the image's per-platform upload metadata (one collapsible card per stock
+ * marketplace with its title/description/categories/keywords + copy buttons +
+ * per-platform "used" stamp), download, edit, delete. Upscaled variants
+ * (Real-ESRGAN via GitHub Actions) are listed in the metadata column with
+ * per-variant mark-used / download / delete actions. Optional looping
+ * prev/next navigation (arrows + ←/→ keys) across the page's image list.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -18,15 +19,33 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Check, ChevronLeft, ChevronRight, FileDown, Pencil, Trash2, Download, ImageOff, ArrowRight, ZoomIn, ExternalLink, AlertTriangle, CheckCircle2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  FileDown,
+  Pencil,
+  Trash2,
+  Download,
+  ImageOff,
+  ArrowRight,
+  ExternalLink,
+  AlertTriangle,
+  CheckCircle2,
+  Ban,
+  TriangleAlert,
+  ZoomIn,
+} from "lucide-react";
 import { CopyButton } from "./CopyButton";
 import { StampToggle } from "./StampToggle";
 import { StatusToggle } from "./StatusToggle";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { api } from "@/lib/api";
 import { formatBytes, formatDateTime } from "@/lib/format";
+import { PLATFORMS } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
-import type { StockImage, Upscale } from "@/lib/types";
+import type { PlatformId, StockImage, Upscale } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface ImageDetailDialogProps {
@@ -56,6 +75,153 @@ interface ImageDetailDialogProps {
 
 const VARIANT_ORIGINAL = "original";
 
+/** One platform's metadata card (collapsible). */
+function PlatformCard({
+  image,
+  platformId,
+  label,
+  open,
+  onOpenChange,
+  onTogglePlatformUsed,
+  busy,
+}: {
+  image: StockImage;
+  platformId: PlatformId;
+  label: string;
+  open: boolean;
+  onOpenChange: () => void;
+  onTogglePlatformUsed: (platform: PlatformId) => void;
+  busy: boolean;
+}) {
+  const meta = image.metadata?.[platformId] as Record<string, unknown> | undefined;
+  const used = image.used?.[platformId] === true;
+  const def = PLATFORMS.find((p) => p.id === platformId);
+  const isEmpty = !meta;
+
+  const keywords = Array.isArray(meta?.keywords) ? (meta!.keywords as string[]) : [];
+  const title = typeof meta?.title === "string" ? (meta.title as string) : typeof meta?.description === "string" ? (meta.description as string) : "";
+  const description = typeof meta?.description === "string" ? (meta.description as string) : "";
+  const categories = Array.isArray(meta?.categories) ? (meta.categories as string[]) : [];
+  const price = typeof meta?.price === "number" ? (meta.price as number) : undefined;
+
+  return (
+    <div
+      className={cn(
+        "border bg-paper",
+        open ? "border-ink" : "border-line",
+        isEmpty && "opacity-80",
+      )}
+      data-testid={`platform-${platformId}`}
+    >
+      <button
+        type="button"
+        onClick={onOpenChange}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 p-2.5 text-left transition-colors hover:bg-surface focus-visible:outline-2 focus-visible:outline-brand"
+        aria-label={`${label} metadata`}
+      >
+        <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-180")} aria-hidden />
+        <span className="font-display text-xs font-bold uppercase tracking-wider">{label}</span>
+        {used && <span className="chip border-stamp/60 text-stamp">used</span>}
+        {isEmpty && <span className="chip border-line-strong text-ink-muted">no metadata</span>}
+        {def?.ai === "refused" && (
+          <span className="chip border-danger/50 text-danger" title={def.aiNote}>
+            <Ban className="mr-0.5 h-3 w-3" aria-hidden />
+            no AI
+          </span>
+        )}
+        {def?.ai === "verify" && (
+          <span className="chip border-amber-500/50 text-amber-600" title={def.aiNote}>
+            <TriangleAlert className="mr-0.5 h-3 w-3" aria-hidden />
+            check policy
+          </span>
+        )}
+        <span className="ml-auto font-mono text-[10px] text-ink-muted">
+          {keywords.length} kw
+        </span>
+      </button>
+
+      {open && (
+        <div className="space-y-2 border-t border-line p-2.5">
+          {isEmpty ? (
+            <p className="font-mono text-[11px] leading-relaxed text-ink-muted">
+              No metadata stored for {label} — edit the image to add it, or re-run the generation
+              agent (it writes every platform&apos;s metadata).
+            </p>
+          ) : (
+            <>
+              {title && (
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <h5 className="eyebrow">{def?.titleField === "description" ? "Description" : "Title"}</h5>
+                    <CopyButton value={title} label={`${label} title`} />
+                  </div>
+                  <p className="mt-0.5 border border-line bg-surface p-2 font-mono text-[11.5px] leading-relaxed">
+                    {title}
+                  </p>
+                </div>
+              )}
+              {description && description !== title && (
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <h5 className="eyebrow">Description</h5>
+                    <CopyButton value={description} label={`${label} description`} />
+                  </div>
+                  <p className="mt-0.5 max-h-24 overflow-y-auto border border-line bg-surface p-2 font-mono text-[11.5px] leading-relaxed">
+                    {description}
+                  </p>
+                </div>
+              )}
+              {categories.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <h5 className="eyebrow">Categories</h5>
+                    <CopyButton value={categories.join(", ")} label={`${label} categories`} />
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {categories.map((c) => (
+                      <span key={c} className="border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px] text-ink">
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {price !== undefined && (
+                <p className="font-mono text-[11px] text-ink-muted">
+                  price <span className="font-semibold text-ink">${price.toFixed(2)}</span>
+                </p>
+              )}
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <h5 className="eyebrow">Keywords ({keywords.length})</h5>
+                  <CopyButton value={keywords.join(",")} label={`${label} keywords (comma separated)`} />
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {keywords.map((k) => (
+                    <span key={k} className="border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px] text-ink">
+                      {k}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+          <div className="pt-1">
+            <StampToggle
+              used={used}
+              small
+              busy={busy}
+              onToggle={() => onTogglePlatformUsed(platformId)}
+              label={`Mark as used on ${label}`}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ImageDetailDialog({
   image,
   onClose,
@@ -76,6 +242,8 @@ export function ImageDetailDialog({
   const [prevId, setPrevId] = useState<string>("");
   const [busyStatus, setBusyStatus] = useState(false);
   const [busyDismiss, setBusyDismiss] = useState(false);
+  const [openPlatform, setOpenPlatform] = useState<string | null>("adobe_stock");
+  const [busyPlatform, setBusyPlatform] = useState<string | null>(null);
   const { toast } = useToast();
 
   const metaScrollRef = useRef<HTMLDivElement>(null);
@@ -135,9 +303,9 @@ export function ImageDetailDialog({
     variant !== VARIANT_ORIGINAL ? upscales.find((u) => u._id === variant) : undefined;
 
   const previewSrc = activeUpscale ? activeUpscale.url : image.image_link;
-  const stampVisible = activeUpscale
-    ? Boolean(activeUpscale.used_in_adobe_stock)
-    : image.used_in_adobe_stock;
+  const anyUsed = (image.used_count ?? 0) > 0 || Object.values(image.used ?? {}).some(Boolean);
+  const stampVisible = activeUpscale ? Boolean(activeUpscale.used_in_adobe_stock) : anyUsed;
+  const displayTitle = image.title || image.metadata?.adobe_stock?.title || "Untitled";
 
   async function toggleActive() {
     if (!image) return;
@@ -173,6 +341,26 @@ export function ImageDetailDialog({
       toast({ variant: "destructive", title: "Update failed", description: msg });
     } finally {
       setBusyDismiss(false);
+    }
+  }
+
+  /** Per-platform used stamp — writes used.<platform> only. */
+  async function togglePlatformUsed(platform: PlatformId) {
+    if (!image) return;
+    const next = image.used?.[platform] !== true;
+    setBusyPlatform(platform);
+    try {
+      const res = await api.images.update(image._id, { used: { [platform]: next } });
+      onImageUpdate(res.data);
+      toast({
+        title: next ? "Marked as used" : "Unmarked",
+        description: `${PLATFORMS.find((p) => p.id === platform)?.label}: ${next ? "the image is flagged as published there." : "flag removed."}`,
+      });
+    } catch (e: unknown) {
+      const msg = (e as { payload?: { message?: string } })?.payload?.message || "The stamp was not applied.";
+      toast({ variant: "destructive", title: "Update failed", description: msg });
+    } finally {
+      setBusyPlatform(null);
     }
   }
 
@@ -261,7 +449,7 @@ export function ImageDetailDialog({
                 <img
                   key={previewSrc}
                   src={previewSrc}
-                  alt={activeUpscale ? `${image.title} — upscaled ×${activeUpscale.scale}` : image.title}
+                  alt={activeUpscale ? `${displayTitle} — upscaled ×${activeUpscale.scale}` : displayTitle}
                   onError={() => setBroken(true)}
                   className="max-h-[42vh] w-full object-contain md:max-h-[62vh]"
                 />
@@ -343,7 +531,7 @@ export function ImageDetailDialog({
                     }}
                     className={cn(
                       "chip border-line-strong transition-colors focus-visible:outline-2 focus-visible:outline-brand",
-                    variant === u._id
+                      variant === u._id
                         ? "border-ink bg-ink text-paper"
                         : "bg-surface text-ink hover:border-ink"
                     )}
@@ -359,11 +547,15 @@ export function ImageDetailDialog({
           <div className="flex min-h-0 flex-col">
             <DialogHeader className="border-b border-line p-4 pr-10">
               <DialogTitle className="text-left font-display text-lg font-bold uppercase leading-tight tracking-wide">
-                {image.title}
+                {displayTitle}
               </DialogTitle>
               <DialogDescription className="sr-only">Image metadata and actions</DialogDescription>
-              <div className="mt-1 flex items-center gap-1.5">
-                <span className="chip border-line-strong text-ink">{image.category}</span>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {image.category && (
+                  <span className="chip border-line-strong text-ink" title="Adobe Stock category">
+                    {image.category}
+                  </span>
+                )}
                 <span className="chip">{image.quality}</span>
                 <span className="chip">{image.ratio}</span>
                 {upscales.length > 0 && (
@@ -371,8 +563,13 @@ export function ImageDetailDialog({
                     <ZoomIn className="mr-1 inline h-3 w-3" aria-hidden />×{upscales.length}
                   </span>
                 )}
-                <CopyButton value={image.title} label="title" className="ml-1" />
-                <CopyButton value={image.category} label="category" />
+                {anyUsed && (
+                  <span className="chip border-stamp/60 text-stamp">
+                    used on {Object.values(image.used ?? {}).filter(Boolean).length} platform
+                    {Object.values(image.used ?? {}).filter(Boolean).length === 1 ? "" : "s"}
+                  </span>
+                )}
+                <CopyButton value={displayTitle} label="title" className="ml-1" />
               </div>
             </DialogHeader>
 
@@ -423,16 +620,21 @@ export function ImageDetailDialog({
                 </p>
               )}
 
+              {/* ── per-platform upload metadata ── */}
               <section>
-                <div className="flex items-center justify-between gap-2">
-                  <h4 className="eyebrow">Keywords ({image.keywords.length})</h4>
-                  <CopyButton value={image.keywords.join(",")} label="keywords (comma separated)" />
-                </div>
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {image.keywords.map((k) => (
-                    <span key={k} className="border border-line bg-paper px-1.5 py-0.5 font-mono text-[11px] text-ink">
-                      {k}
-                    </span>
+                <h4 className="eyebrow">Platform upload metadata</h4>
+                <div className="mt-1.5 space-y-1.5">
+                  {PLATFORMS.map((p) => (
+                    <PlatformCard
+                      key={p.id}
+                      image={image}
+                      platformId={p.id}
+                      label={p.label}
+                      open={openPlatform === p.id}
+                      onOpenChange={() => setOpenPlatform(openPlatform === p.id ? null : p.id)}
+                      onTogglePlatformUsed={togglePlatformUsed}
+                      busy={busyPlatform === p.id}
+                    />
                   ))}
                 </div>
               </section>
@@ -600,7 +802,11 @@ export function ImageDetailDialog({
                   CSV
                 </button>
               )}
-              <StampToggle used={image.used_in_adobe_stock} onToggle={() => onToggleUsed(image)} />
+              <StampToggle
+                used={anyUsed}
+                onToggle={() => onToggleUsed(image)}
+                label="Toggle the used state (mark = Adobe Stock, unmark = clear every platform)"
+              />
               <StatusToggle
                 active={image.active !== false}
                 disabled={busyStatus}
@@ -641,7 +847,7 @@ export function ImageDetailDialog({
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         title="Delete this image?"
-        description={`"${image.title}" will be removed from the database. The generated file stays wherever it is hosted — this only removes the record.`}
+        description={`"${displayTitle}" will be removed from the database. The generated file stays wherever it is hosted — this only removes the record.`}
         confirmLabel="Delete"
         danger
         onConfirm={() => {
