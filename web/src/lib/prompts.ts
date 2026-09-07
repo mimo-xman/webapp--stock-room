@@ -11,11 +11,19 @@
  * repo links) — filled once, kept in localStorage — plus its own
  * mission-specific variables. The page loads the selected template LIVE from
  * GitHub (public repo, CORS-open) with a bundled fallback per prompt.
+ *
+ * GLOBAL CONTENT RULES — the owner's absolute image ban (no living beings, no
+ * faces, no body parts, even on objects) must reach the agent in EVERY
+ * prompt, present and future. Every template embeds the canonical block
+ * (scripts/gen-prompt-template.py refuses to bundle a prompt without it) and
+ * renderTemplate() appends it as a final safety net to any rendered prompt
+ * whose template somehow lost it.
  */
 
 import { BUNDLED_TEMPLATE_MAIN } from "./prompt-templates/main";
 import { BUNDLED_TEMPLATE_ADOBE_STOCK } from "./prompt-templates/adobe-stock";
 import { BUNDLED_TEMPLATE_COLORING_BOOK_ETSY } from "./prompt-templates/coloring-book-etsy";
+import { GLOBAL_CONTENT_RULES } from "./prompt-templates/global-content-rules";
 
 export const TEMPLATE_SOURCE_BASE =
   "https://raw.githubusercontent.com/mimo-xman/webapp--stock-room/main/prompts";
@@ -162,7 +170,7 @@ export const PROMPTS: PromptDefinition[] = [
   {
     id: "coloring-book-etsy",
     title: "Coloring book — Etsy",
-    tagline: "Children's line-art coloring pages + cover — the agent researches Etsy demand and picks the theme itself.",
+    tagline: "Children's line-art coloring pages + cover — the agent researches Etsy demand and picks a NON-LIVING theme itself (the owner's content rules: no living beings, no faces, no body parts).",
     purpose: "etsy",
     icon: "book",
     file: "prompts/coloring-book-etsy.md",
@@ -172,7 +180,7 @@ export const PROMPTS: PromptDefinition[] = [
         key: "numberOfPages",
         token: "[NUMBER OF COLORING PAGES]",
         label: "Number of coloring pages",
-        help: "How many coloring pages to produce (cover is extra, always 1). The theme is NOT typed here — the agent researches Etsy's current demand and picks it itself.",
+        help: "How many coloring pages to produce (cover is extra, always 1). The theme is NOT typed here — the agent researches Etsy's current demand and picks it itself, always a NON-LIVING theme (no animals, no people, no characters: the owner's global content rules).",
         placeholder: "20",
         type: "number",
         required: true,
@@ -284,6 +292,21 @@ export interface RenderResult {
   replacedCount: number;
 }
 
+/** Marker proving a template already embeds the owner's global content rules. */
+const CONTENT_RULES_MARKER = "NO LIVING BEINGS";
+
+/**
+ * Safety net — the owner's absolute image ban (no living beings, no faces, no
+ * body parts, even on objects) must be inside EVERY prompt sent to an agent.
+ * The templates embed the canonical block (see prompts/_global-content-rules.md
+ * and scripts/gen-prompt-template.py); if a template — live or bundled, today
+ * or in the future — somehow lost it, append the block to the rendered prompt.
+ */
+function withGlobalContentRules(rendered: string): string {
+  if (rendered.includes(CONTENT_RULES_MARKER)) return rendered;
+  return `${rendered.trimEnd()}\n\n---\n\n${GLOBAL_CONTENT_RULES.trim()}\n`;
+}
+
 /** Replace every variable token with its validated value. */
 export function renderTemplate(prompt: PromptDefinition, template: string, values: PromptValues): RenderResult {
   let rendered = template;
@@ -296,7 +319,7 @@ export function renderTemplate(prompt: PromptDefinition, template: string, value
       replacedCount += 1;
     }
   }
-  return { prompt: rendered, replacedCount };
+  return { prompt: withGlobalContentRules(rendered), replacedCount };
 }
 
 /** Leftover [BRACKETED] tokens after rendering — template/form drift. */

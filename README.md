@@ -48,12 +48,23 @@ détaillé est dans [`AGENT_PROMPT.md`](AGENT_PROMPT.md)) :
 |---|---|---|
 | [`prompts/main.md`](prompts/main.md) | **Universel** — explique les deux APIs + la structure Session → Images ; tu décris la mission (n'importe quoi : visuels Instagram, scènes vidéo, pubs…) | `[MISSION BRIEF]` |
 | [`prompts/adobe-stock.md`](prompts/adobe-stock.md) | Batch **Adobe Stock** — règles dures (aucun être vivant, aucun visage/partie du corps), recherche live des règles, métadonnées prêtes à l'upload | `[NUMBER OF PROMPTS TO CREATE]` |
-| [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Coloring book Etsy** — pages line-art pour enfants + couverture, print-ready ; l'agent **recherche lui-même le thème tendance le plus demandé** sur Etsy (pas de variable thème — il décide et justifie) | `[NUMBER OF COLORING PAGES]` |
+| [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Coloring book Etsy** — pages line-art pour enfants + couverture, print-ready ; l'agent **recherche lui-même le thème tendance le plus demandé** sur Etsy et le choisit **SANS êtres vivants** (règles de contenu du propriétaire — véhicules, machines, bâtiments, jouets, plantes, motifs…) (pas de variable thème — il décide et justifie) | `[NUMBER OF COLORING PAGES]` |
+
+### Les règles de contenu du propriétaire — dans tous les prompts, présents et futurs
+
+Interdit de générer des images contenant des **êtres vivants** (humains, animaux), des
+**visages** (yeux, oreilles, bouche… même sur des objets) ou des **membres** (pieds, mains,
+bras… même isolés). Plantes, fleurs et arbres autorisés. Le texte canonique vit dans
+[`prompts/_global-content-rules.md`](prompts/_global-content-rules.md) ; il est intégré
+dans chaque prompt (l'agent l'applique pendant sa recherche internet, dans chaque prompt de
+génération, et au contrôle visuel), `scripts/gen-prompt-template.py` **refuse** de générer un
+prompt sans ces règles, et la webapp les réinjecte automatiquement si un template les perd.
 
 La webapp (page **Agent prompts**) remplie, valide et exporte ces prompts — les six variables
 de connexion (les 2 URLs + 2 clés + 2 repos) sont partagées entre tous les prompts et
 sauvegardées une fois pour toutes dans le navigateur. Ajouter un 4ᵉ prompt = un fichier
-`.md` dans `prompts/` + une entrée dans `web/src/lib/prompts.ts`.
+`.md` dans `prompts/` (avec le bloc des règles de contenu — le build le vérifie) + une
+entrée dans `web/src/lib/prompts.ts`.
 
 ## Aperçu de la webapp
 

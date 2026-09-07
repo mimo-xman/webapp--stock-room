@@ -31,12 +31,54 @@ register). In one uninterrupted run you will: research Etsy's current rules, res
 children's coloring book themes are trending and most in demand RIGHT NOW, **pick the theme
 yourself** (the owner does not choose it — you do, based on your research), design the book,
 create one Stock Room session for it, generate the cover and every coloring page with the
-image API, visually verify each page against the HARD RULES, register each compliant image
+image API, visually verify each page against the GLOBAL CONTENT RULES and the HARD RULES,
+register each compliant image
 inside the session, then verify and report.
 
 A sellable coloring book is **a coherent product, not a pile of pictures**: one theme, one
 style, consistent line weight, cute child-friendly subjects, and pages that a child can
 actually color (closed shapes, mostly white space). Every rule below exists to protect that.
+And the theme is ALWAYS a non-living theme: the GLOBAL CONTENT RULES below forbid living
+beings, faces and body parts in every image — a children's coloring book is no exception
+(no animals, no people, no characters; vehicles, machines, buildings, toys, objects, plants
+and patterns instead).
+
+## GLOBAL CONTENT RULES — the owner's absolute image ban (every mission, every image)
+
+These are the owner's personal life rules for image generation. They apply to EVERY image
+of EVERY mission on EVERY platform, and they override everything else — the mission brief,
+the platform's rules, the demand research, anything below. When the brief or the research
+conflicts with them, THESE RULES WIN: pick the closest compliant subject, deliver it, and
+report the adaptation. A violating image is rejected at the visual check and never saved.
+
+1. **NO LIVING BEINGS.** Never generate humans or animals — no mammals, birds, fish,
+   insects, reptiles or any other creature, real or fictional, cute or scary — not as
+   photos, not as illustrations or cartoons, not as silhouettes, shadows or reflections,
+   and not as toys, plushes, statues or figurines of living beings. Plants, flowers and
+   trees ARE allowed (they are not "beings" here), and so are food, objects, vehicles,
+   machines, buildings, interiors, landscapes, textures, patterns and abstracts — pick
+   those instead.
+2. **NO FACES — ZERO TOLERANCE, EVEN ON OBJECTS.** Nothing in any image may have, resemble
+   or evoke a face: no eyes, no ears, no mouth, no nose, no eyebrows, no face-like
+   patterns. This bans anthropomorphic designs (a smiling sun, a car with eyes, a happy
+   teapot, a jack-o'-lantern), statues, busts, mannequins, dolls, robots, masks, skulls,
+   carved or painted faces on any object, and pareidolia (clouds, wood knots, rocks or
+   shadows that "look like" a face). If a viewer could say "this looks like a face", the
+   image is REJECTED.
+3. **NO BODY PARTS — ZERO TOLERANCE, EVEN ON OBJECTS.** Nothing in any image may have,
+   resemble or evoke body parts: no hands, no feet, no arms, no legs, no fingers, no toes
+   — not attached to a subject, not isolated, not in close-up (a hand holding a cup, a
+   footprint, a fingerprint), and no object given limbs or hands.
+
+Apply them at EVERY stage of the work. During the internet research, filter every trend,
+theme and subject idea through these rules BEFORE planning anything — a living-beings
+theme (farm animals, dinosaurs, ocean life, jungle friends, people, characters…) is
+forbidden however well it sells; translate the demand into the closest non-living theme
+(vehicles, machines, buildings, toys, objects, plants, patterns…). In EVERY generation
+prompt, include the negatives `no people, no animals, no living beings, no faces, no
+facial features, no body parts, no anthropomorphic elements`. And at the visual check,
+reject any image where a living being, a face or a body part appears — even partially,
+even in the background, even cute or stylized.
 
 ## HARD RULES — never violate
 
@@ -47,11 +89,16 @@ actually color (closed shapes, mostly white space). Every rule below exists to p
    colored), generous white space, uncluttered composition. A page with any gray tone or any
    colored area is a REJECTED page.
 2. **CHILD-SAFE CONTENT — ZERO TOLERANCE.** Target age 4–8 by default. Subjects must be
-   friendly, cute and positive. Absolutely no: scary or grotesque imagery, violence, weapons,
+   friendly, cute and positive — and they must be NON-LIVING subjects (vehicles, machines,
+   buildings, toys, everyday objects, plants, patterns — the GLOBAL CONTENT RULES forbid
+   animals, people and characters even in a cute cartoon style). Absolutely no: scary or
+   grotesque imagery, violence, weapons,
    blood, horror, adult themes, occult/satanic symbols, sad or crying scenes, realistic
    medical procedures. When in doubt, make it cuter.
-3. **NO COPYRIGHTED OR TRADEMARKED CHARACTERS — EVER.** Only original, generic subjects: real
-   or invented animals, vehicles, plants, objects, scenes. Never: Disney/Pixar/Marvel/anime
+3. **NO COPYRIGHTED OR TRADEMARKED CHARACTERS — EVER.** Only original, generic subjects:
+   vehicles, machines, buildings, toys, plants, objects, patterns, scenes — never animals,
+   people or living characters (that is doubly forbidden: GLOBAL CONTENT RULES + IP risk).
+   Never: Disney/Pixar/Marvel/anime
    style characters, brand mascots, celebrity likenesses, franchise vehicles or logos, or
    anything "in the style of" a known franchise. Etsy removes listings over IP claims — one
    infringement can kill the whole product.
@@ -72,6 +119,10 @@ actually color (closed shapes, mostly white space). Every rule below exists to p
    submitted, and not when the first difficulties appear.
 9. **Never ask questions.** Everything you need is in this document. If something is
    ambiguous, decide sensibly and proceed.
+10. **The GLOBAL CONTENT RULES are HARD RULES.** The owner's absolute ban — no living beings,
+    no faces, no body parts (the section above) — applies to the cover AND every page,
+    whatever the theme, the research or the demand says. A violating image is rejected, never
+    saved, and replaced with a compliant one.
 
 ## STEP 1 — Research Etsy rules + what sells (web search)
 
@@ -87,20 +138,31 @@ what currently sells in kids' coloring books on Etsy: trending coloring book the
 season, best-selling printable coloring books, which themes buyers search for most, typical
 page counts, what makes buyers leave 5-star reviews (print quality, cute style, one subject
 per page, difficulty matched to age). Cross-reference several sources (Etsy search results,
-bestseller lists, trend articles) and then **pick ONE theme yourself** using these criteria:
+bestseller lists, trend articles), filter every candidate theme through the GLOBAL CONTENT
+RULES (a living-beings theme is disqualified, whatever its demand), and then **pick ONE
+theme yourself** using these criteria:
 
 - **currently in demand** — recurring in bestseller/trend results, not a fading fad;
+- **compliant with the GLOBAL CONTENT RULES — MANDATORY, NON-NEGOTIABLE.** The theme must
+  yield pages with ZERO living beings, faces or body parts. Animal, people and character
+  themes are FORBIDDEN however well they sell (farm animals, dinosaurs, ocean life, jungle
+  friends, unicorns, pets, robots-with-faces…). When the research shows demand for a
+  living-beings theme, translate that demand into the closest non-living theme: vehicles
+  and machines (the eternal kid favorite), buildings and houses, toys and everyday objects,
+  plants and flowers, geometric patterns and mandalas;
 - **sellable for a digital download** — a broad, kid-friendly subject families actually
-  search for (e.g. a family of animals, vehicles, seasonal activity…);
+  search for (e.g. vehicles, machines, buildings, seasonal objects…);
 - **not drowning in identical competition** — if the top results are already thousands of
   near-identical books, prefer an adjacent fresher angle on the same demand;
 - **visually rich** — the theme must naturally yield at least [NUMBER OF COLORING PAGES]
   distinct, cute, single-subject pages;
-- **fully compatible with HARD RULES 1–3** (line art, child-safe, zero IP risk).
+- **fully compatible with the GLOBAL CONTENT RULES and HARD RULES 1–3** (zero living beings,
+  faces, body parts; line art, child-safe, zero IP risk).
 
 The theme you pick is a decision, not a guess: the final report must state it and justify it
 with the evidence you found (list your sources). If the web search fails, fall back to a
-proven evergreen theme (e.g. farm animals, dinosaurs, ocean life) and report the fallback.
+proven evergreen NON-LIVING theme (e.g. construction vehicles, houses and homes, garden
+flowers, mandala patterns — never a living-beings theme) and report the fallback.
 Note the recurring positive patterns from your research and apply them to your page design.
 
 ## STEP 2 — Design the book
@@ -115,23 +177,26 @@ Headers: X-API-Key: [STOCK ROOM API KEY]
 ```
 
 If a previous coloring book on the same theme already exists, vary the subjects and the
-composition meaningfully — not the same 20 animals in the same order. If the answer contains
+composition meaningfully — not the same 20 subjects in the same order. If the answer contains
 `"truncated": true`, page through `GET …/api/images?limit=100&page=N`.
 
 **2.1 — Book identity.**
 
 - **Book title** — short, friendly, includes the theme you picked at STEP 1b (e.g. theme
-  "ocean animals" → "Happy Ocean Friends Coloring Book"). You invent the exact title
+  "construction vehicles" → "Busy Machines Coloring Book"). You invent the exact title
   (original — no existing book titles).
-- **Cover concept** — colorful, cheerful, shows the theme's hero subject, title text large
+- **Cover concept** — colorful, cheerful, shows the theme's hero subject (a NON-LIVING
+  subject: vehicle, machine, building, object, flower… — never an animal or character),
+  title text large
   and readable, professional print-ready layout.
 - **Age group** — default 4–8 (big shapes, few details); adjust only if the theme demands it.
 
 **2.2 — Page list.** List the [NUMBER OF COLORING PAGES] coloring pages: ONE subject per page
-(e.g. for "Ocean animals": page 1 smiling dolphin, page 2 sea turtle, page 3 starfish, …).
+(e.g. for "Construction vehicles": page 1 excavator, page 2 dump truck, page 3 cement mixer, …).
 Rules: all distinct (no two near-identical), spread across the theme (no 10 variants of the
-same animal), a gentle difficulty progression (simplest pages first), each described by a
-2–4 word subject label used in the title and keywords.
+same subject), a gentle difficulty progression (simplest pages first), each described by a
+2–4 word subject label used in the title and keywords. Every subject must respect the GLOBAL
+CONTENT RULES — non-living, no face, no body parts.
 
 **2.3 — Per-page generation prompt.** Build every page's prompt with the line-art formula
 from APPENDIX C (subject swapped in). Build the cover prompt with the cover formula.
@@ -190,12 +255,16 @@ Settings (deliberate — print product):
   replacement page with a new subject at the end so the page count still reaches
   [NUMBER OF COLORING PAGES].
 - **Visual check (MANDATORY before saving) — cover:** colorful, theme clear, title text
-  readable and correctly spelled, child-friendly, no watermark. **— each page:** pure black
+  readable and correctly spelled, child-friendly, no living beings, no faces, no body parts
+  (GLOBAL CONTENT RULES — an anthropomorphic hero subject is a REJECT), no watermark.
+  **— each page:** pure black
   outlines on pure white (HARD RULE 1), no gray, no color, closed colorable shapes, cute
-  child-safe subject (HARD RULE 2), no text, no franchise characters (HARD RULE 3), style
+  child-safe NON-LIVING subject (HARD RULE 2 + GLOBAL CONTENT RULES — zero living beings,
+  zero faces, zero body parts), no text, no franchise characters (HARD RULE 3), style
   consistent with the rest of the book (HARD RULE 5). Reject any page that fails ANY of
   these — do not save it, do not count it; fix the prompt (e.g. add `no shading, no gray
-  tones, no color fills`) and generate a replacement. If your runtime truly cannot view
+  tones, no color fills, no animals, no people, no faces, no body parts`) and generate a
+  replacement. If your runtime truly cannot view
   images, say so in the final report and enforce the strongest textual exclusions instead.
 - Generate sequentially (one job at a time) — the queue is serialized server-side anyway.
 
@@ -221,13 +290,14 @@ Body: {
 Metadata conventions:
 
 - **title** — `"<Book title> — Cover"` for the cover, `"<Book title> — Page <N>: <subject>"`
-  for pages (e.g. `Happy Ocean Friends Coloring Book — Page 7: Starfish`). N is the final
+  for pages (e.g. `Busy Machines Coloring Book — Page 7: Cement Mixer`). N is the final
   page order. 3–200 characters, no trailing punctuation.
 - **category** — `Graphic Resources` (line art printables) for every image of the book.
 - **keywords** — 25–49 keywords, most important first, lowercase, no duplicates. Stack:
   product terms (`coloring page`, `coloring book`, `printable`, `kids activity`, `digital
   download`, `instant download`, `print at home`, `line art`, `black and white`) → theme
-  terms (`ocean`, `sea animals`, `dolphin`, `turtle`…) → use-case terms (`gift for kids`,
+  terms (matching the non-living theme: e.g. `construction`, `vehicles`, `excavator`, `dump
+  truck`…) → use-case terms (`gift for kids`,
   `birthday activity`, `toddler`, `preschool`, `ages 4-8`…).
 - `keywords` is a JSON array of 3–50 strings. Do not set `used_in_adobe_stock` — the owner
   marks images as used after publishing the book on Etsy.
@@ -244,10 +314,12 @@ record is complete. Then output a final report:
 
 - session title + id
 - the theme you picked, why you picked it, and the demand evidence behind it (STEP 1b sources)
+  — plus how you kept it compliant with the GLOBAL CONTENT RULES (non-living theme)
 - the book title, the chosen age group and style
 - ordered table: page # / subject / title / keywords count / image_link (cover first)
 - generation stats: attempts, durations, any replaced or skipped pages and why
-- quality control: every image rejected at the visual check and the exact reason (gray
+- quality control: every image rejected at the visual check and the exact reason (living
+  being, face, body part — GLOBAL CONTENT RULES; gray
   tones, open shapes, franchise character, scary subject, garbled text on cover…)
 - Etsy compliance: the rules you found and applied at STEP 1a (list your sources)
 - a suggested listing description (title + 2 short paragraphs + bullet list) the owner can
@@ -318,23 +390,28 @@ is shared by all Stock Room missions, platform-agnostic.)
 
 ## APPENDIX D — Prompt formulas (line art + cover)
 
-**Coloring page (swap `<subject>`):**
+**Coloring page (swap `<subject>` — ALWAYS a non-living subject: vehicle, machine,
+building, toy, object, plant, pattern):**
 
 ```
 Black and white coloring page for children: <subject>. Clean bold black outlines on a pure
 white background, thick uniform line weight, simple closed shapes with large white areas to
 color inside, cute friendly cartoon style, uncluttered full-page composition, generous
 margins. No shading, no gray tones, no hatching, no gradients, no color, no fill patterns,
-no text, no letters, no numbers, no signature, no watermark, no frame.
+no text, no letters, no numbers, no signature, no watermark, no frame, no people, no
+animals, no living beings, no faces, no facial features, no body parts, no anthropomorphic
+elements.
 ```
 
-**Cover (swap `<book title>` and `<theme hero subject>`):**
+**Cover (swap `<book title>` and `<theme hero subject>` — the hero is ALWAYS non-living):**
 
 ```
 Children's coloring book cover for a printable PDF. Cheerful colorful cartoon illustration of
 <theme hero subject>, bright friendly palette, soft background, large readable title text
 "<book title>" in rounded playful letters at the top, small subtitle "Coloring Book for Kids
-Ages 4-8" beneath, professional print-ready layout, portrait format. No watermark, no
+Ages 4-8" beneath, professional print-ready layout, portrait format. No people, no animals,
+no living beings, no faces, no facial features, no body parts, no anthropomorphic elements,
+no watermark, no
 signature, no brand logos.
 ```
 

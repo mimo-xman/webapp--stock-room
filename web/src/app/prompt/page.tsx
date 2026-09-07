@@ -23,6 +23,7 @@ import {
   FileText,
   Plug,
   RefreshCw,
+  ShieldCheck,
   Sparkles,
   Store,
   Target,
@@ -216,6 +217,11 @@ export default function AgentPromptPage() {
           <h1 className="font-display text-3xl font-bold uppercase tracking-tight">Agent prompts</h1>
           <p className="font-mono text-xs text-ink-muted">
             pick a mission → fill the variables once → validate → copy or download the ready-to-send prompt
+          </p>
+          <p className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-ink-muted">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-brand" aria-hidden />
+            every prompt embeds the owner's global content rules — no living beings, no faces,
+            no body parts — enforced at research, generation and visual check
           </p>
         </div>
 
