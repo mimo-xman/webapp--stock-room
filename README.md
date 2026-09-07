@@ -47,7 +47,7 @@ détaillé est dans [`AGENT_PROMPT.md`](AGENT_PROMPT.md)) :
 | Prompt | Mission | Variable spécifique |
 |---|---|---|
 | [`prompts/main.md`](prompts/main.md) | **Universel** — explique les deux APIs + la structure Session → Images ; tu décris la mission (n'importe quoi : visuels Instagram, scènes vidéo, pubs…) | `[MISSION BRIEF]` |
-| [`prompts/adobe-stock.md`](prompts/adobe-stock.md) | Batch **Adobe Stock** — règles dures (aucun être vivant, aucun visage/partie du corps), recherche live des règles, métadonnées prêtes à l'upload | `[NUMBER OF PROMPTS TO CREATE]` |
+| [`prompts/adobe-stock.md`](prompts/adobe-stock.md) | Batch **Adobe Stock** — recherche de règles en live, **recherche de saturation sur stock.adobe.com** (règles de distinctivité), règles dures (aucun être vivant, aucun visage/partie du corps), **profils de différenciation par image** (jamais la depiction par défaut), métadonnées prêtes à l'upload | `[NUMBER OF PROMPTS TO CREATE]` |
 | [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Coloring book Etsy** — pages line-art pour enfants + couverture, print-ready ; l'agent **recherche lui-même le thème tendance le plus demandé** sur Etsy et le choisit **SANS êtres vivants** (règles de contenu du propriétaire — véhicules, machines, bâtiments, jouets, plantes, motifs…) (pas de variable thème — il décide et justifie) | `[NUMBER OF COLORING PAGES]` |
 
 ### Les règles de contenu du propriétaire — dans tous les prompts, présents et futurs
@@ -60,11 +60,34 @@ dans chaque prompt (l'agent l'applique pendant sa recherche internet, dans chaqu
 génération, et au contrôle visuel), `scripts/gen-prompt-template.py` **refuse** de générer un
 prompt sans ces règles, et la webapp les réinjecte automatiquement si un template les perd.
 
+### Les règles de distinctivité (anti-rejet « similar content ») — dans tous les prompts, présents et futurs
+
+Adobe Stock **refuse** le contenu trop proche de ce qui existe déjà (« closely resembles
+content already available ») — c'est LE motif de rejet qui gaspillait le quota et l'énergie.
+Le remède définitif vit dans
+[`prompts/_global-distinctiveness-rules.md`](prompts/_global-distinctiveness-rules.md) et
+suit la même architecture que les règles de contenu : intégré dans **chaque** prompt,
+vérifié au build (`CLEARLY DIFFERENTIATED`), réinjecté par la webapp si un template le perd.
+L'agent doit :
+
+- différencier chaque image **deux fois** — du catalogue existant de la plateforme ET des
+  autres images du même batch (sur ≥ 2 des 4 axes que les modérateurs vérifient :
+  composition, couleur, ambiance, scénario) ;
+- **jamais la depiction par défaut** (le « rendu moyen » que le modèle produit avec un prompt
+générique — c'est exactement le look déjà présent des milliers de fois) ;
+- **vérifier la saturation avant de s'engager** sur un sujet : chercher le sujet sur
+  stock.adobe.com / etsy.com, lire le nombre de résultats et la première page ;
+- **vérifier la distinctivité avant de sauvegarder** : une image générique ou jumelle d'une
+  autre image du run est rejetée et régénérée, exactement comme une violation des règles de
+  contenu ;
+- **sélectif plutôt que volumineux** : N images = N concepts distincts, jamais un concept
+décliné N fois.
+
 La webapp (page **Agent prompts**) remplie, valide et exporte ces prompts — les six variables
 de connexion (les 2 URLs + 2 clés + 2 repos) sont partagées entre tous les prompts et
 sauvegardées une fois pour toutes dans le navigateur. Ajouter un 4ᵉ prompt = un fichier
-`.md` dans `prompts/` (avec le bloc des règles de contenu — le build le vérifie) + une
-entrée dans `web/src/lib/prompts.ts`.
+`.md` dans `prompts/` (avec **les deux blocs de règles** — contenu + distinctivité — le build
+les vérifie) + une entrée dans `web/src/lib/prompts.ts`.
 
 ## Aperçu de la webapp
 

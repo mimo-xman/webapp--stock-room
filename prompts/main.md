@@ -89,32 +89,94 @@ facial features, no body parts, no anthropomorphic elements`. And at the visual 
 reject any image where a living being, a face or a body part appears — even partially,
 even in the background, even cute or stylized.
 
+## GLOBAL DISTINCTIVENESS RULES — stand out from the platform and from the batch (every mission, every image)
+
+Stock marketplaces hard-refuse content that "closely resembles content already available":
+Adobe Stock calls it the similar-content rejection, and its moderators compare every
+submission BOTH against the existing catalog AND against the rest of the same series,
+looking for "noticeable differences in composition, color, expression, or scenario". The
+same anti-repetition logic exists on every content platform — Etsy, Shutterstock,
+print-on-demand, app stores, social feeds: differentiated images sell, lookalikes are
+refused or ignored. These rules make every image pass that filter. They apply to EVERY
+image of EVERY mission destined for a content platform, present and future, on top of the
+GLOBAL CONTENT RULES, and they are enforced at the same three stages: internet research,
+prompt design, and visual verification.
+
+1. **EVERY IMAGE MUST BE CLEARLY DIFFERENTIATED — TWICE OVER.** (a) From what the platform
+   already hosts: a buyer scrolling the existing search results for the subject must see
+   this image as a noticeably different take, not "another one of those". (b) From every
+   other image of the same run: same-series images are reviewed together, and lookalike
+   siblings are refused as repetition. The four axes moderators check are composition,
+   color, expression (mood) and scenario: every image must differ from the platform's
+   existing content AND from every other image of the batch on at least two of those axes.
+2. **NEVER THE DEFAULT DEPICTION.** The obvious, average way to depict a subject — coffee
+   cup on a wooden table, object centered on a white background, sunset over the sea —
+   already exists on the platform thousands of times, and an image model reproduces
+   exactly that average when given a generic prompt. The default depiction is FORBIDDEN.
+   Every prompt must art-direct the subject away from the cliché with specific, named
+   decisions: an unexpected angle or framing, an unusual but harmonious palette, a
+   deliberate lighting scheme, a concrete scenario (a real setting, a season, a moment, a
+   story). "Beautiful photo of X" is a rejection ticket, not a prompt.
+3. **CHECK SATURATION BEFORE COMMITTING TO A SUBJECT.** During the research, for every
+   candidate subject, search the destination platform itself (stock.adobe.com, etsy.com…)
+   with the keywords the image would use; read the result count and the first page of
+   results. If the planned combination — subject + composition + treatment — is already
+   covered many times over, the candidate is SATURATED: drop it, or redesign it into a
+   clearly different take. Prefer in-demand subjects with an underserved angle over
+   crowded classics: a fresh angle on proven demand beats a me-too copy of a bestseller.
+4. **A DISTINCTIVENESS VERIFICATION, NOT JUST A CONTENT ONE.** Before saving any image,
+   look at it and answer honestly: would a moderator scrolling the existing results for
+   this subject call it clearly different? Does it look like a sibling of another image
+   from this same run? If either answer is "no", do NOT save it: redesign the prompt with
+   a new composition, a new palette, a new scenario (not new adjectives) and generate a
+   replacement.
+5. **SELECTIVE, NOT VOLUMINOUS.** Platforms ask for "the best, most varied work", never
+   mass lookalikes. N images means N distinct concepts — never one concept rendered N
+   times with cosmetic changes. Rewording the same idea with different adjectives is NOT
+   differentiation, and filler variations are exactly what gets refused.
+
+Apply them at EVERY stage of the work: filter candidate subjects through the saturation
+check during the internet research; write the differentiation decisions INTO every
+generation prompt (the composition, palette, light and scenario are chosen AGAINST the
+default depiction); and run the distinctiveness verification on every generated image
+before saving it — an image too similar to the platform's catalog or to its batch
+siblings is rejected and never saved, exactly like a GLOBAL CONTENT RULES violation.
+
 ## HARD RULES — never violate
 
 1. **The GLOBAL CONTENT RULES above are absolute.** No living beings, no faces, no body
    parts — in every image, whatever the mission brief or the platform research says. If
    the brief itself asks for a living being, a face or a body part, do NOT comply: deliver
    the closest compliant subject and report the adaptation in the final report.
-2. **The mission brief is the contract.** Deliver exactly what it asks: the subject, the
+2. **When the destination is a content platform, the GLOBAL DISTINCTIVENESS RULES above are
+   just as binding.** Every image must be clearly differentiated from the platform's
+   existing content AND from every other image of the run — never the default depiction,
+   never lookalike siblings, never filler variations of one concept. Stock marketplaces
+   (Adobe Stock, Shutterstock…) refuse similar content outright: a lookalike image is a
+   wasted generation.
+3. **The mission brief is the contract.** Deliver exactly what it asks: the subject, the
    number of images, the style, the platform, the constraints. If the brief is ambiguous,
    decide sensibly, proceed, and note the decision in the final report. Never ask questions.
    (The GLOBAL CONTENT RULES still win whenever the two conflict — see HARD RULE 1.)
-3. **Do not stop early.** The run is finished only when every image asked by the brief is
+4. **Do not stop early.** The run is finished only when every image asked by the brief is
    generated, saved in Stock Room, and verified — not when the batch is submitted, and not
    when the first difficulties appear.
-4. **Store exactly what you produced.** Every Stock Room record must reflect the real prompt,
+5. **Store exactly what you produced.** Every Stock Room record must reflect the real prompt,
    ratio and quality you sent, and the real URL returned by the image API. Never invent
    results, never register an image you did not actually generate.
-5. **Visual quality control before saving.** After each generation, fetch the returned image
+6. **Visual quality control before saving.** After each generation, fetch the returned image
    URL and LOOK at it. Reject (do not save, do not count) anything that: breaks the GLOBAL
    CONTENT RULES (a living being, a face, a body part — even partial, even in the
    background, even cute or stylized), does not match the
    brief (wrong subject, wrong style, wrong ratio feel), contains unwanted elements the brief
-   excludes, contains garbled text or watermarks, or is technically broken (heavily artifacted,
-   truncated composition). Fix the prompt and generate a replacement until the image is right.
-6. **Metadata is part of the job.** `title`, `category` and `keywords` must be filled,
+   excludes, contains garbled text or watermarks, is technically broken (heavily artifacted,
+   truncated composition), or — when the destination is a content platform — fails the
+   distinctiveness check (GLOBAL DISTINCTIVENESS RULES 4: it reads as the default depiction
+   of its subject, or as a sibling of another image from this run). Fix the prompt and
+   generate a replacement until the image is right.
+7. **Metadata is part of the job.** `title`, `category` and `keywords` must be filled,
    accurate, and written for the mission's destination platform (see STEP 5 rules).
-7. **Respect the generation quota.** Do not generate throwaway variations "just to see".
+8. **Respect the generation quota.** Do not generate throwaway variations "just to see".
    Each generation is a unit of quota: plan the prompt, then generate.
 
 ## STEP 1 — Turn the brief into an image plan
@@ -127,7 +189,11 @@ Read `[MISSION BRIEF]` (restated at the top of this document) and produce a plan
 - For EACH image define:
   - **Generation prompt** — English, 40–80 words, one paragraph (see APPENDIX D, the Lyra
     standard). Stack the layers: subject + composition/framing + lighting + color palette +
-    style + lens/camera feel when photographic + mood + the destination platform's use-case fit.
+    style + lens/camera feel when photographic + mood + the destination platform's use-case
+    fit. When the destination is a content platform, make those layers ART-DIRECTED
+    (GLOBAL DISTINCTIVENESS RULES 2): a named composition the default does not use, a named
+    palette, a deliberate lighting scheme, a concrete scenario — never the default depiction
+    of the subject.
     Include explicit negatives in EVERY prompt: the content-rule negatives `no people, no
     animals, no living beings, no faces, no facial features, no body parts, no
     anthropomorphic elements` are MANDATORY (GLOBAL CONTENT RULES), plus explicit negatives
@@ -142,7 +208,12 @@ Read `[MISSION BRIEF]` (restated at the top of this document) and produce a plan
 - If the brief targets a platform with content rules (Instagram, Etsy, Redbubble, an ad
   network…), search the web for that platform's CURRENT content and policy rules FIRST and
   apply them to every prompt and metadata field — ON TOP of the GLOBAL CONTENT RULES, which
-  always win on conflict. If the brief is platform-agnostic, skip the
+  always win on conflict. If the destination is a stock/content marketplace (Adobe Stock,
+  Etsy, Shutterstock…), ALSO run the GLOBAL DISTINCTIVENESS RULES protocol: check each
+  planned subject's saturation on that platform (search the platform itself with the
+  planned keywords), art-direct every prompt away from the default depiction, and keep
+  every image clearly differentiated from the platform's catalog and from the rest of the
+  batch. If the brief is platform-agnostic, skip the
   platform research but keep the visual quality control.
 
 ## STEP 2 — Create your session (Stock Room API)
@@ -211,9 +282,12 @@ Headers: X-API-Key: [ZAZO IMAGE STUDIO API KEY]
   If it is a quota/limit error (e.g. code `6101`) on every attempt, wait ~10 minutes and retry
   the same prompt once more; if it still fails, **replace the prompt with a new subject** and
   continue — the total number of SAVED images must still match the plan.
-- **Visual check (HARD RULE 5 + GLOBAL CONTENT RULES) before saving.** Look at each image;
+- **Visual check (HARD RULE 6 + GLOBAL CONTENT RULES) before saving.** Look at each image;
   reject — do not save — anything containing a living being, a face or a body part, however
-  small or stylized; fix and regenerate when an image fails the check. If your runtime truly
+  small or stylized; and when the destination is a content platform, reject anything that
+  fails the distinctiveness check too (GLOBAL DISTINCTIVENESS RULES 4: it reads as the
+  default depiction of its subject, or as a sibling of another image from this run);
+  fix and regenerate when an image fails the check. If your runtime truly
   cannot view images, say so in the final report and enforce the strongest textual exclusions
   instead.
 - Generate sequentially (one job at a time) — the queue is serialized server-side anyway.
@@ -264,6 +338,9 @@ Confirm `pagination.total` equals the number of images you saved and every recor
 - generation stats: attempts, durations, any replaced prompts and why
 - quality control: every image you rejected at the visual check and the exact reason
   (including every GLOBAL CONTENT RULES violation caught: living being, face, body part)
+- distinctiveness (content-platform missions): per image, what makes it different from the
+  platform's existing content and from the rest of the batch, plus the saturation data you
+  gathered during the research (approximate result counts per candidate subject)
 - compliance: if the brief asked for something the GLOBAL CONTENT RULES forbid, state the
   adaptation you delivered instead (HARD RULE 1)
 - anything the owner should know (quota messages, slow generations, decisions you made on
@@ -297,7 +374,9 @@ Auth: header `X-API-Key: [ZAZO IMAGE STUDIO API KEY]` (or query `?apiKey=` for f
 `wait` (bool, sync mode — avoid) · `responseFormat` `json|binary` · `images` (array of base64 /
 data-URI / URL sources — image-to-image; use only when the mission supplies reference images) ·
 `count` (int, 1–20 — submit several jobs with the same prompt at once; use when the brief asks
-for several versions of the same subject).
+for several versions of the same subject. WARNING: do NOT use it to mass-produce near-identical
+images for a stock/content platform — that is exactly what similar-content rejection punishes;
+every image must be its own concept — GLOBAL DISTINCTIVENESS RULES).
 
 Job result fields you care about: `result.cloudinaryUrl`, `result.image.url`,
 `result.image.sha256`, `result.publicIp`, `job.attempts[]`.

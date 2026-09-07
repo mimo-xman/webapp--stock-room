@@ -80,6 +80,59 @@ facial features, no body parts, no anthropomorphic elements`. And at the visual 
 reject any image where a living being, a face or a body part appears — even partially,
 even in the background, even cute or stylized.
 
+## GLOBAL DISTINCTIVENESS RULES — stand out from the platform and from the batch (every mission, every image)
+
+Stock marketplaces hard-refuse content that "closely resembles content already available":
+Adobe Stock calls it the similar-content rejection, and its moderators compare every
+submission BOTH against the existing catalog AND against the rest of the same series,
+looking for "noticeable differences in composition, color, expression, or scenario". The
+same anti-repetition logic exists on every content platform — Etsy, Shutterstock,
+print-on-demand, app stores, social feeds: differentiated images sell, lookalikes are
+refused or ignored. These rules make every image pass that filter. They apply to EVERY
+image of EVERY mission destined for a content platform, present and future, on top of the
+GLOBAL CONTENT RULES, and they are enforced at the same three stages: internet research,
+prompt design, and visual verification.
+
+1. **EVERY IMAGE MUST BE CLEARLY DIFFERENTIATED — TWICE OVER.** (a) From what the platform
+   already hosts: a buyer scrolling the existing search results for the subject must see
+   this image as a noticeably different take, not "another one of those". (b) From every
+   other image of the same run: same-series images are reviewed together, and lookalike
+   siblings are refused as repetition. The four axes moderators check are composition,
+   color, expression (mood) and scenario: every image must differ from the platform's
+   existing content AND from every other image of the batch on at least two of those axes.
+2. **NEVER THE DEFAULT DEPICTION.** The obvious, average way to depict a subject — coffee
+   cup on a wooden table, object centered on a white background, sunset over the sea —
+   already exists on the platform thousands of times, and an image model reproduces
+   exactly that average when given a generic prompt. The default depiction is FORBIDDEN.
+   Every prompt must art-direct the subject away from the cliché with specific, named
+   decisions: an unexpected angle or framing, an unusual but harmonious palette, a
+   deliberate lighting scheme, a concrete scenario (a real setting, a season, a moment, a
+   story). "Beautiful photo of X" is a rejection ticket, not a prompt.
+3. **CHECK SATURATION BEFORE COMMITTING TO A SUBJECT.** During the research, for every
+   candidate subject, search the destination platform itself (stock.adobe.com, etsy.com…)
+   with the keywords the image would use; read the result count and the first page of
+   results. If the planned combination — subject + composition + treatment — is already
+   covered many times over, the candidate is SATURATED: drop it, or redesign it into a
+   clearly different take. Prefer in-demand subjects with an underserved angle over
+   crowded classics: a fresh angle on proven demand beats a me-too copy of a bestseller.
+4. **A DISTINCTIVENESS VERIFICATION, NOT JUST A CONTENT ONE.** Before saving any image,
+   look at it and answer honestly: would a moderator scrolling the existing results for
+   this subject call it clearly different? Does it look like a sibling of another image
+   from this same run? If either answer is "no", do NOT save it: redesign the prompt with
+   a new composition, a new palette, a new scenario (not new adjectives) and generate a
+   replacement.
+5. **SELECTIVE, NOT VOLUMINOUS.** Platforms ask for "the best, most varied work", never
+   mass lookalikes. N images means N distinct concepts — never one concept rendered N
+   times with cosmetic changes. Rewording the same idea with different adjectives is NOT
+   differentiation, and filler variations are exactly what gets refused.
+
+Apply them at EVERY stage of the work: filter candidate subjects through the saturation
+check during the internet research; write the differentiation decisions INTO every
+generation prompt (the composition, palette, light and scenario are chosen AGAINST the
+default depiction); and run the distinctiveness verification on every generated image
+before saving it — an image too similar to the platform's catalog or to its batch
+siblings is rejected and never saved, exactly like a GLOBAL CONTENT RULES violation.
+
 ## HARD RULES — never violate
 
 1. **COLORING PAGES ARE LINE ART — NOTHING ELSE.** Every coloring page must be: pure **black
@@ -102,24 +155,32 @@ even in the background, even cute or stylized.
    style characters, brand mascots, celebrity likenesses, franchise vehicles or logos, or
    anything "in the style of" a known franchise. Etsy removes listings over IP claims — one
    infringement can kill the whole product.
-4. **ETSY COMPLIANT (SEARCH THE CURRENT RULES — NEVER ASSUME THEM).** At STEP 1 you MUST
+4. **DISTINCT PAGES, DISTINCT BOOK — NO LOOKALIKES (GLOBAL DISTINCTIVENESS RULES).** Etsy is
+   flooded with near-identical coloring books, and buyers pick the one that looks different.
+   The theme angle you pick at STEP 1b must not be a me-too copy of the current bestsellers,
+   and every page must be its own scene: no two pages with the same subject, framing or
+   composition — each page differs from every other on at least two of the four axes
+   (composition, color treatment, mood, scenario). A book of lookalike pages is not
+   sellable, and on stock platforms it is exactly what similar-content rejection refuses.
+5. **ETSY COMPLIANT (SEARCH THE CURRENT RULES — NEVER ASSUME THEM).** At STEP 1 you MUST
    search the web for Etsy's CURRENT policies: "Etsy seller policy", "Etsy digital downloads
    policy", "Etsy creativity standards AI generated art". Apply what you find ON TOP of HARD
-   RULES 1–3, to every image, title and keyword. If the search fails, apply the most
+   RULES 1–4, to every image, title and keyword. If the search fails, apply the most
    conservative interpretation and report it.
-5. **ONE BOOK, ONE STYLE.** All pages (and the cover) must share the same art style, the same
+6. **ONE BOOK, ONE STYLE.** All pages (and the cover) must share the same art style, the same
    line weight, the same level of detail and the same visual language. A book whose pages
-   look like they came from five different artists is not sellable.
-6. **NO TEXT ON COLORING PAGES.** Coloring pages contain no words, no letters, no numbers, no
+   look like they came from five different artists is not sellable. (One style does NOT mean
+   one composition: same style, distinct scenes — HARD RULE 4.)
+7. **NO TEXT ON COLORING PAGES.** Coloring pages contain no words, no letters, no numbers, no
    signature, no watermark. The ONLY image with text is the cover (its title).
-7. **Store exactly what you produced.** Every Stock Room record must reflect the real prompt,
+8. **Store exactly what you produced.** Every Stock Room record must reflect the real prompt,
    ratio and quality you sent, and the real URL returned. Never invent results.
-8. **Do not stop early.** The run is finished only when the cover + [NUMBER OF COLORING PAGES]
+9. **Do not stop early.** The run is finished only when the cover + [NUMBER OF COLORING PAGES]
    coloring pages are generated, saved, and verified in the database — not when the batch is
    submitted, and not when the first difficulties appear.
-9. **Never ask questions.** Everything you need is in this document. If something is
+10. **Never ask questions.** Everything you need is in this document. If something is
    ambiguous, decide sensibly and proceed.
-10. **The GLOBAL CONTENT RULES are HARD RULES.** The owner's absolute ban — no living beings,
+11. **The GLOBAL CONTENT RULES are HARD RULES.** The owner's absolute ban — no living beings,
     no faces, no body parts (the section above) — applies to the cover AND every page,
     whatever the theme, the research or the demand says. A violating image is rejected, never
     saved, and replaced with a compliant one.
@@ -152,8 +213,11 @@ theme yourself** using these criteria:
   plants and flowers, geometric patterns and mandalas;
 - **sellable for a digital download** — a broad, kid-friendly subject families actually
   search for (e.g. vehicles, machines, buildings, seasonal objects…);
-- **not drowning in identical competition** — if the top results are already thousands of
-  near-identical books, prefer an adjacent fresher angle on the same demand;
+- **not drowning in identical competition (verify it on Etsy itself — GLOBAL DISTINCTIVENESS
+  RULES 3)** — search etsy.com for the theme (e.g. "construction vehicles coloring book")
+  and look at how many near-identical books the first pages contain; if the theme is
+  saturated with lookalikes, prefer an adjacent fresher angle on the same demand (a
+  different sub-theme, a distinct art style, a unique page concept);
 - **visually rich** — the theme must naturally yield at least [NUMBER OF COLORING PAGES]
   distinct, cute, single-subject pages;
 - **fully compatible with the GLOBAL CONTENT RULES and HARD RULES 1–3** (zero living beings,
@@ -193,7 +257,10 @@ composition meaningfully — not the same 20 subjects in the same order. If the 
 
 **2.2 — Page list.** List the [NUMBER OF COLORING PAGES] coloring pages: ONE subject per page
 (e.g. for "Construction vehicles": page 1 excavator, page 2 dump truck, page 3 cement mixer, …).
-Rules: all distinct (no two near-identical), spread across the theme (no 10 variants of the
+Rules: all distinct (no two near-identical — HARD RULE 4: every page differs from every
+other on at least two of the four axes composition/color-treatment/mood/scenario — different
+subject AND different scene, e.g. a digger at a sandbox worksite vs. a dump truck on a
+mountain road), spread across the theme (no 10 variants of the
 same subject), a gentle difficulty progression (simplest pages first), each described by a
 2–4 word subject label used in the title and keywords. Every subject must respect the GLOBAL
 CONTENT RULES — non-living, no face, no body parts.
@@ -261,7 +328,10 @@ Settings (deliberate — print product):
   outlines on pure white (HARD RULE 1), no gray, no color, closed colorable shapes, cute
   child-safe NON-LIVING subject (HARD RULE 2 + GLOBAL CONTENT RULES — zero living beings,
   zero faces, zero body parts), no text, no franchise characters (HARD RULE 3), style
-  consistent with the rest of the book (HARD RULE 5). Reject any page that fails ANY of
+  consistent with the rest of the book (HARD RULE 6), and NOT a lookalike of another page of
+  this same book (HARD RULE 4 + GLOBAL DISTINCTIVENESS RULES 4: same subject or same
+  composition as a previously saved page → reject it and redesign the scene). Reject any
+  page that fails ANY of
   these — do not save it, do not count it; fix the prompt (e.g. add `no shading, no gray
   tones, no color fills, no animals, no people, no faces, no body parts`) and generate a
   replacement. If your runtime truly cannot view
@@ -320,7 +390,11 @@ record is complete. Then output a final report:
 - generation stats: attempts, durations, any replaced or skipped pages and why
 - quality control: every image rejected at the visual check and the exact reason (living
   being, face, body part — GLOBAL CONTENT RULES; gray
-  tones, open shapes, franchise character, scary subject, garbled text on cover…)
+  tones, open shapes, franchise character, scary subject, garbled text on cover…; lookalike
+  page — HARD RULE 4 / GLOBAL DISTINCTIVENESS RULES)
+- distinctiveness: what makes THIS book different from the current Etsy competition for its
+  theme (the angle and style decisions, with the saturation evidence you found at STEP 1b),
+  and how the pages differ from each other
 - Etsy compliance: the rules you found and applied at STEP 1a (list your sources)
 - a suggested listing description (title + 2 short paragraphs + bullet list) the owner can
   paste into Etsy

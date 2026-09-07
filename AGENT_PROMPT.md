@@ -9,7 +9,7 @@ Each mission type has its own ready-to-send prompt in [`prompts/`](prompts/):
 | Prompt file | Mission | Specific variables |
 |---|---|---|
 | [`prompts/main.md`](prompts/main.md) | **Any mission** — the universal prompt. Explains how to use the two APIs (Stock Room + Zazo Image Studio) and the Session → Images data structure; embeds the GLOBAL CONTENT RULES; you fill in `[MISSION BRIEF]` with whatever you want produced (a brief asking for living beings is overridden by the rules). | `[MISSION BRIEF]` |
-| [`prompts/adobe-stock.md`](prompts/adobe-stock.md) | **Adobe Stock batch** — demand research, hard rules (no living beings, no faces/body parts), upload-ready metadata. | `[NUMBER OF PROMPTS TO CREATE]` |
+| [`prompts/adobe-stock.md`](prompts/adobe-stock.md) | **Adobe Stock batch** — live rules research, **saturation check on stock.adobe.com itself**, per-image **differentiation profiles** (never the default depiction — the similar-content rejection killer), hard rules (no living beings, no faces/body parts), upload-ready metadata. | `[NUMBER OF PROMPTS TO CREATE]` |
 | [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Etsy coloring book** — children's line-art coloring pages + cover, Etsy rules researched live, print-ready. The agent researches current Etsy demand and **picks a NON-LIVING theme itself** (the owner's global content rules ban animals, people and characters; it picks vehicles, machines, buildings, toys, plants, patterns… and justifies with sources). | `[NUMBER OF COLORING PAGES]` |
 
 All three share the same six connection variables (the two API links + keys + backup repo
@@ -42,6 +42,35 @@ Two mechanisms keep it that way for **future** prompts:
 2. The webapp's `renderTemplate()` appends the canonical block to any rendered prompt whose
    template somehow lost it — the rules always reach the agent.
 
+## The GLOBAL DISTINCTIVENESS RULES — every prompt, present and future
+
+Adobe Stock hard-refuses content that "closely resembles content already available" and
+same-series images without "noticeable differences in composition, color, expression, or
+scenario" — the similar-content rejection. The definitive fix is a second canonical rule
+set, applied with the exact same architecture as the content rules:
+
+- **Every image clearly differentiated — twice over**: from what the platform already
+  hosts AND from every other image of the same run (on at least two of the four axes
+  moderators check: composition, color, mood, scenario).
+- **Never the default depiction** — the generic, average look an image model produces by
+  default is exactly what already floods the platform; every prompt must art-direct the
+  subject away from it (named composition, named palette, deliberate lighting, concrete
+  scenario).
+- **Saturation checked before committing to a subject** — the agent searches the platform
+  itself (stock.adobe.com / etsy.com) with the planned keywords and reads the result count
+  + first page before spending quota.
+- **Distinctiveness verified before saving** — a generic or lookalike image is rejected
+  and regenerated, exactly like a content-rules violation.
+- **Selective, not voluminous** — N images = N distinct concepts, never one concept
+  rendered N times.
+
+The canonical text lives in
+[`prompts/_global-distinctiveness-rules.md`](prompts/_global-distinctiveness-rules.md)
+(single source of truth). It is embedded verbatim in **every** prompt, the generator script
+**refuses** to bundle a prompt without its marker (`CLEARLY DIFFERENTIATED`), and the
+webapp's `renderTemplate()` appends the canonical block as a safety net — so future
+prompts inherit the anti-similarity doctrine automatically.
+
 ## How to use a prompt
 
 1. Open the prompt file for your mission (or use the webapp's **Agent prompts** page — it
@@ -57,9 +86,12 @@ the first fill you only ever type the mission-specific variable.
 
 1. Copy the closest prompt in `prompts/` to a new `.md` file (keep the layout: variables
    table → ✂ CUT HERE → prompt).
-2. **Paste the GLOBAL CONTENT RULES block from `prompts/_global-content-rules.md`
-   verbatim into the template** (below the cut line, before the HARD RULES) — the owner's
-   image ban applies to every prompt, and the build enforces it (see the section above).
+2. **Paste BOTH canonical rule blocks into the template** (below the cut line, before the
+   HARD RULES): the GLOBAL CONTENT RULES from
+   `prompts/_global-content-rules.md` (the owner's image ban) AND the GLOBAL
+   DISTINCTIVENESS RULES from `prompts/_global-distinctiveness-rules.md` (the anti-similarity
+   doctrine) — both apply to every prompt, and the build enforces both (see the sections
+   above).
 3. Reuse the existing `[BRACKETED]` tokens where possible (shared values auto-fill).
 4. Run `python3 scripts/gen-prompt-template.py` and commit both files, then register the
    prompt in `web/src/lib/prompts.ts` — it appears in the webapp switcher automatically.

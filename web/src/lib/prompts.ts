@@ -18,12 +18,22 @@
  * (scripts/gen-prompt-template.py refuses to bundle a prompt without it) and
  * renderTemplate() appends it as a final safety net to any rendered prompt
  * whose template somehow lost it.
+ *
+ * GLOBAL DISTINCTIVENESS RULES — the anti-similarity doctrine (every image
+ * clearly differentiated from the platform's existing content AND from the
+ * rest of the batch; never the default depiction; saturation checked before
+ * committing to a subject; distinctiveness verified before saving) gets the
+ * exact same treatment: embedded in every template (the generator script
+ * refuses to bundle a prompt without it) and appended here as a safety net.
+ * This is the definitive fix for Adobe Stock's similar-content rejection —
+ * it applies to every prompt, present and future.
  */
 
 import { BUNDLED_TEMPLATE_MAIN } from "./prompt-templates/main";
 import { BUNDLED_TEMPLATE_ADOBE_STOCK } from "./prompt-templates/adobe-stock";
 import { BUNDLED_TEMPLATE_COLORING_BOOK_ETSY } from "./prompt-templates/coloring-book-etsy";
 import { GLOBAL_CONTENT_RULES } from "./prompt-templates/global-content-rules";
+import { GLOBAL_DISTINCTIVENESS_RULES } from "./prompt-templates/global-distinctiveness-rules";
 
 export const TEMPLATE_SOURCE_BASE =
   "https://raw.githubusercontent.com/mimo-xman/webapp--stock-room/main/prompts";
@@ -150,7 +160,7 @@ export const PROMPTS: PromptDefinition[] = [
   {
     id: "adobe-stock",
     title: "Adobe Stock",
-    tagline: "Sell-ready stock batch: demand research, hard rules, upload metadata.",
+    tagline: "Sell-ready stock batch: saturation research on Adobe Stock, differentiation profiles, hard rules, upload metadata.",
     purpose: "adobe stock",
     icon: "store",
     file: "prompts/adobe-stock.md",
@@ -295,6 +305,9 @@ export interface RenderResult {
 /** Marker proving a template already embeds the owner's global content rules. */
 const CONTENT_RULES_MARKER = "NO LIVING BEINGS";
 
+/** Marker proving a template already embeds the global distinctiveness rules. */
+const DISTINCTIVENESS_MARKER = "CLEARLY DIFFERENTIATED";
+
 /**
  * Safety net — the owner's absolute image ban (no living beings, no faces, no
  * body parts, even on objects) must be inside EVERY prompt sent to an agent.
@@ -305,6 +318,23 @@ const CONTENT_RULES_MARKER = "NO LIVING BEINGS";
 function withGlobalContentRules(rendered: string): string {
   if (rendered.includes(CONTENT_RULES_MARKER)) return rendered;
   return `${rendered.trimEnd()}\n\n---\n\n${GLOBAL_CONTENT_RULES.trim()}\n`;
+}
+
+/**
+ * Safety net #2 — the GLOBAL DISTINCTIVENESS RULES (anti-similarity: stand out
+ * from the platform's existing content and from the rest of the batch, never
+ * the default depiction, saturation checked, distinctiveness verified) must
+ * also be inside EVERY prompt sent to an agent. Stock platforms (Adobe Stock
+ * first) hard-refuse similar content — an agent prompt without these rules
+ * produces lookalikes that die in review. The templates embed the canonical
+ * block (see prompts/_global-distinctiveness-rules.md and
+ * scripts/gen-prompt-template.py, which refuses to bundle a prompt without
+ * it); if a template — live or bundled, today or in the future — somehow lost
+ * it, append the block to the rendered prompt.
+ */
+function withGlobalDistinctivenessRules(rendered: string): string {
+  if (rendered.includes(DISTINCTIVENESS_MARKER)) return rendered;
+  return `${rendered.trimEnd()}\n\n---\n\n${GLOBAL_DISTINCTIVENESS_RULES.trim()}\n`;
 }
 
 /** Replace every variable token with its validated value. */
@@ -319,7 +349,7 @@ export function renderTemplate(prompt: PromptDefinition, template: string, value
       replacedCount += 1;
     }
   }
-  return { prompt: withGlobalContentRules(rendered), replacedCount };
+  return { prompt: withGlobalDistinctivenessRules(withGlobalContentRules(rendered)), replacedCount };
 }
 
 /** Leftover [BRACKETED] tokens after rendering — template/form drift. */

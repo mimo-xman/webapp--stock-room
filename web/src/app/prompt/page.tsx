@@ -221,7 +221,9 @@ export default function AgentPromptPage() {
           <p className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-ink-muted">
             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-brand" aria-hidden />
             every prompt embeds the owner's global content rules — no living beings, no faces,
-            no body parts — enforced at research, generation and visual check
+            no body parts — and the global distinctiveness rules — clearly differentiated from
+            the platform and the batch, never the default depiction — enforced at research,
+            generation and visual check
           </p>
         </div>
 

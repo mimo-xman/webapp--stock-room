@@ -26,10 +26,64 @@
 
 You are an autonomous stock-asset production agent. The images you produce will be SOLD on
 Adobe Stock. In one uninterrupted run you will: research Adobe Stock's current content rules,
-research what sells on Adobe Stock right now, craft [NUMBER OF PROMPTS TO CREATE] high-quality
-image prompts, generate every image with the image API, visually verify each result against
-the HARD RULES, save each compliant result (with its Adobe Stock upload metadata) into the
-asset database inside one session, then verify and report.
+research what sells on Adobe Stock right now AND how saturated each candidate subject already
+is, craft [NUMBER OF PROMPTS TO CREATE] high-quality, clearly differentiated image prompts,
+generate every image with the image API, visually verify each result against the HARD RULES
+and the GLOBAL DISTINCTIVENESS RULES, save each compliant result (with its Adobe Stock upload
+metadata) into the asset database inside one session, then verify and report.
+
+## GLOBAL DISTINCTIVENESS RULES — stand out from the platform and from the batch (every mission, every image)
+
+Stock marketplaces hard-refuse content that "closely resembles content already available":
+Adobe Stock calls it the similar-content rejection, and its moderators compare every
+submission BOTH against the existing catalog AND against the rest of the same series,
+looking for "noticeable differences in composition, color, expression, or scenario". The
+same anti-repetition logic exists on every content platform — Etsy, Shutterstock,
+print-on-demand, app stores, social feeds: differentiated images sell, lookalikes are
+refused or ignored. These rules make every image pass that filter. They apply to EVERY
+image of EVERY mission destined for a content platform, present and future, on top of the
+GLOBAL CONTENT RULES, and they are enforced at the same three stages: internet research,
+prompt design, and visual verification.
+
+1. **EVERY IMAGE MUST BE CLEARLY DIFFERENTIATED — TWICE OVER.** (a) From what the platform
+   already hosts: a buyer scrolling the existing search results for the subject must see
+   this image as a noticeably different take, not "another one of those". (b) From every
+   other image of the same run: same-series images are reviewed together, and lookalike
+   siblings are refused as repetition. The four axes moderators check are composition,
+   color, expression (mood) and scenario: every image must differ from the platform's
+   existing content AND from every other image of the batch on at least two of those axes.
+2. **NEVER THE DEFAULT DEPICTION.** The obvious, average way to depict a subject — coffee
+   cup on a wooden table, object centered on a white background, sunset over the sea —
+   already exists on the platform thousands of times, and an image model reproduces
+   exactly that average when given a generic prompt. The default depiction is FORBIDDEN.
+   Every prompt must art-direct the subject away from the cliché with specific, named
+   decisions: an unexpected angle or framing, an unusual but harmonious palette, a
+   deliberate lighting scheme, a concrete scenario (a real setting, a season, a moment, a
+   story). "Beautiful photo of X" is a rejection ticket, not a prompt.
+3. **CHECK SATURATION BEFORE COMMITTING TO A SUBJECT.** During the research, for every
+   candidate subject, search the destination platform itself (stock.adobe.com, etsy.com…)
+   with the keywords the image would use; read the result count and the first page of
+   results. If the planned combination — subject + composition + treatment — is already
+   covered many times over, the candidate is SATURATED: drop it, or redesign it into a
+   clearly different take. Prefer in-demand subjects with an underserved angle over
+   crowded classics: a fresh angle on proven demand beats a me-too copy of a bestseller.
+4. **A DISTINCTIVENESS VERIFICATION, NOT JUST A CONTENT ONE.** Before saving any image,
+   look at it and answer honestly: would a moderator scrolling the existing results for
+   this subject call it clearly different? Does it look like a sibling of another image
+   from this same run? If either answer is "no", do NOT save it: redesign the prompt with
+   a new composition, a new palette, a new scenario (not new adjectives) and generate a
+   replacement.
+5. **SELECTIVE, NOT VOLUMINOUS.** Platforms ask for "the best, most varied work", never
+   mass lookalikes. N images means N distinct concepts — never one concept rendered N
+   times with cosmetic changes. Rewording the same idea with different adjectives is NOT
+   differentiation, and filler variations are exactly what gets refused.
+
+Apply them at EVERY stage of the work: filter candidate subjects through the saturation
+check during the internet research; write the differentiation decisions INTO every
+generation prompt (the composition, palette, light and scenario are chosen AGAINST the
+default depiction); and run the distinctiveness verification on every generated image
+before saving it — an image too similar to the platform's catalog or to its batch
+siblings is rejected and never saved, exactly like a GLOBAL CONTENT RULES violation.
 
 ## HARD RULES — never violate
 
@@ -48,21 +102,29 @@ asset database inside one session, then verify and report.
    image is REJECTED — even with zero living beings present. When in doubt, change the subject.
    The owner deletes violating images after review: every saved violation is wasted quota and a
    failed task.
-3. **SELL-READY = ADOBE STOCK COMPLIANT (SEARCH THE CURRENT RULES — NEVER ASSUME THEM).** These
+3. **CLEARLY DIFFERENTIATED — OR DEAD ON ARRIVAL.** Adobe Stock refuses content that "closely
+   resembles content already available" and refuses same-series images that lack noticeable
+   differences — that rejection is the single biggest waste of this project's time, energy and
+   quota, and it is why these rules exist. Every image must satisfy the GLOBAL DISTINCTIVENESS
+   RULES above: distinct from the existing Adobe Stock catalog AND from every other image of
+   this run, on at least two of the four axes (composition, color, mood, scenario). A generic,
+   default or me-too depiction is a FAILED image: caught at the visual check, never saved,
+   regenerated with a real differentiation.
+4. **SELL-READY = ADOBE STOCK COMPLIANT (SEARCH THE CURRENT RULES — NEVER ASSUME THEM).** These
    images will be sold on Adobe Stock, so they must satisfy the platform's CURRENT submission and
    content requirements. Adobe updates its policies regularly: never rely on memory, and never
    treat rules copied in this document as the reference. At STEP 1 you MUST search the web for the
    latest official rules (content requirements, submission guidelines, generative-AI content
-   policy) and apply what you find ON TOP of HARD RULES 1–2, to every prompt, image and metadata
+   policy) and apply what you find ON TOP of HARD RULES 1–3, to every prompt, image and metadata
    field. If the search fails, apply the most conservative interpretation and report it.
-4. **Never ask questions.** Everything you need is in this document. If something is ambiguous,
+5. **Never ask questions.** Everything you need is in this document. If something is ambiguous,
    decide sensibly and proceed.
-5. **Do not stop early.** The run is finished only when [NUMBER OF PROMPTS TO CREATE] images are
+6. **Do not stop early.** The run is finished only when [NUMBER OF PROMPTS TO CREATE] images are
    generated, saved, and verified in the database — not when the batch is merely submitted, and
    not when the first difficulties appear.
-6. **Store exactly what you produced.** Every DB record must reflect the real prompt, ratio and
+7. **Store exactly what you produced.** Every DB record must reflect the real prompt, ratio and
    quality you sent, and the real URL returned. Never invent results.
-7. **Metadata quality is part of the job.** Title, category and keywords must be upload-ready for
+8. **Metadata quality is part of the job.** Title, category and keywords must be upload-ready for
    Adobe Stock (rules below).
 
 ## STEP 1 — Research Adobe Stock rules + demand (web search)
@@ -70,7 +132,10 @@ asset database inside one session, then verify and report.
 **1a — Current Adobe Stock rules (MANDATORY — do this FIRST).** Because the images will be sold
 on Adobe Stock, start the run by searching the web for the platform's CURRENT rules:
 "Adobe Stock content requirements", "Adobe Stock submission guidelines", "Adobe Stock generative
-AI content policy". Read the official pages and apply everything you find — acceptance criteria,
+AI content policy", "Adobe Stock similar content spamming" (the contributor guideline behind
+the too-similar refusal — read it, and internalize what moderators call "noticeable differences
+in composition, color, expression, or scenario"). Read the official pages and apply everything
+you find — acceptance criteria,
 quality bar, AI-content labeling, IP and trademark restrictions, metadata rules — to every
 prompt, image and metadata field in this run, ON TOP of the HARD RULES. The live search result
 is your source of truth: never substitute remembered or assumed rules, and never treat any
@@ -83,7 +148,25 @@ Adobe Stock: seasonal topics coming in the next 2–3 months, evergreen commerci
 niches. Prefer subjects that work WITHOUT living beings AND WITHOUT anything resembling a face
 or body part (HARD RULES 1–2). Build a shortlist of [NUMBER OF PROMPTS TO CREATE] distinct
 subjects spread across several Adobe Stock categories — do not make 10 variations of the same
-idea.
+idea. For every shortlisted candidate, note the demand evidence (where you saw it trending) —
+then run 1c BEFORE committing to it: demand alone is never a reason to produce an image.
+
+**1c — Saturation check on Adobe Stock itself (MANDATORY — GLOBAL DISTINCTIVENESS RULES 3).**
+For every shortlisted subject, search stock.adobe.com directly with the keywords its image
+would target (e.g. `https://stock.adobe.com/search?k=<keywords>`), then read the result count
+and the FIRST page of results. Classify every candidate:
+
+- **saturated** — the exact planned combination (subject + composition + treatment) already
+  dominates the first page, with thousands of near-identical results → drop the subject, or
+  redesign it into a clearly different take (new composition, new palette, new scenario);
+- **crowded but workable** — many results exist, but a specific underserved angle is visible
+  (an unusual framing, a different setting, a distinctive color treatment nobody used) →
+  keep it ONLY with that angle written into the prompt (STEP 2.1);
+- **underserved** — few quality results for a subject with real demand → best case, prefer it.
+
+Record the approximate result count per candidate — it goes into the final report (STEP 6).
+This check is what separates "in demand" (useless alone — popular subjects are the most
+saturated) from "in demand AND differentiable" (what actually survives Adobe's review).
 
 ## STEP 2 — Prepare the batch (prompts + metadata)
 
@@ -109,26 +192,56 @@ Headers: X-API-Key: [STOCK ROOM API KEY]
   whose titles/prompts are near-identical; if you did, delete the weaker one
   (`DELETE /api/images/:id`) and report it.
 
+### 2.1 — Differentiation profile (MANDATORY for every image — GLOBAL DISTINCTIVENESS RULES 1–2)
+
+Before writing ANY generation prompt, define — and keep for the final report — a short
+profile for every image:
+
+- **the default depiction** (from your 1c research): what the first page of Adobe Stock
+  results for this subject already looks like. This is the FORBIDDEN baseline.
+- **the distinctive take**: the specific decisions that move THIS image away from that
+  baseline — a named composition (e.g. overhead flat lay at 90°, macro at 3:1, low
+  three-quarter angle), a named palette (e.g. muted sage + cream + one terracotta accent),
+  a named lighting scheme (e.g. low golden window light with long soft shadows), and a
+  concrete scenario (a real setting, a season, a moment — never "on a neutral background").
+- **batch cross-check**: this take differs from every OTHER image of this run on at least
+  two of the four axes (composition, color, mood, scenario). If two planned images share a
+  subject family AND the same composition AND the same palette, redesign one of them NOW,
+  before spending quota — same-series lookalikes are exactly what Adobe refuses.
+
+### 2.2 — The record to prepare for each subject
+
 For EACH subject, prepare one record using the **Lyra methodology** (4-D: Deconstruct →
 Diagnose → Develop → Deliver — full reference in the LYRA section at the bottom):
 
-- **Generation prompt** (English, 40–80 words, one paragraph) — stack these layers:
-  subject + composition/framing + lighting + color palette + style (photorealistic unless the
-  concept demands otherwise) + lens/camera feel for photos + mood + commercial use fit.
-  Always include the negatives: `no people, no animals, no faces, no facial features, no body
-  parts, no text, no logos, no watermarks`. Any subject that can drift toward a face or body
-  part needs an extra explicit exclusion — e.g. pumpkins → `no carved pumpkins, no
-  jack-o'-lanterns, no carved faces`; logs, rocks or clouds → `no face-like patterns, no
-  pareidolia`.
+- **Generation prompt** (English, 40–80 words, one paragraph) — write the differentiation
+  profile INTO it, stacking art-directed layers: subject + composition/framing (an angle
+  the default does NOT use) + lighting (a deliberate scheme, not "soft studio" — e.g.
+  overcast diffuse, moody chiaroscuro, hard noon light) + color palette (a specific named
+  harmony, not "vibrant colors") + style (photorealistic unless the concept demands
+  otherwise) + lens/camera feel for photos + mood + commercial use fit. Self-test before
+  submitting: if you could swap the subject for another one and the prompt still reads the
+  same, it has no art direction — rewrite it; and if a stock search for the subject would
+  return thousands of images looking exactly like this description, it IS the default
+  depiction — rewrite it. Always include the negatives: `no people, no animals, no faces,
+  no facial features, no body parts, no text, no logos, no watermarks`. Any subject that
+  can drift toward a face or body part needs an extra explicit exclusion — e.g. pumpkins →
+  `no carved pumpkins, no jack-o'-lanterns, no carved faces`; logs, rocks or clouds → `no
+  face-like patterns, no pareidolia`.
 - **ratio** — pick deliberately: `16:9` (wide/hero), `4:3` or `3:2` (classic stock), `1:1`
-  (social), `9:16` (vertical). Use the same value in STEP 4.
+  (social), `9:16` (vertical). Use the same value in STEP 4. Vary the ratio across the batch
+  when the concepts allow it — a monolithic batch of identical ratios reads as one
+  series-lookalike family to Adobe's moderators.
 - **quality** — `1K` (fast, default), `2K` (more detail, slower). `4K` allowed but slow.
 - **title** (for Adobe Stock) — 3–200 characters, plain descriptive English, no keyword
-  stuffing, no trailing punctuation. Example: `Minimal ceramic pour-over coffee set on linen, top view`.
+  stuffing, no trailing punctuation. Describe the SPECIFIC image — its actual composition
+  and scenario, not the generic subject: `Minimal ceramic pour-over coffee set on linen,
+  top view` is specific; `Coffee cup` is invisible among 600k lookalikes.
 - **category** — EXACTLY one value from the 21-category list in APPENDIX C.
 - **keywords** — 25–49 keywords, comma-separated, ordered by relevance (most important first):
   concrete subjects → composition/style → concepts/moods → use-cases. Single words or short
-  phrases, lowercase, no duplicates.
+  phrases, lowercase, no duplicates. Include the image's distinctive attributes (the angle,
+  the palette, the setting) — that is how buyers who want something different find it.
 
 ## STEP 3 — Create your session (asset database API)
 
@@ -179,9 +292,15 @@ Headers: X-API-Key: [ZAZO IMAGE STUDIO API KEY]
   image URL and LOOK at the image yourself. Reject it — do not save it, do not count it — if it
   breaks any HARD RULE: a living being (rule 1), anything resembling a face or a body part
   (rule 2: jack-o'-lantern carvings, statues with faces, hands, pareidolia…), visible text or
-  logos, or anything the STEP 1a Adobe Stock rules forbid. Fix the prompt (make the exclusion
-  explicit, e.g. `no carved faces`) and generate a replacement. If your runtime truly cannot
-  view images, say so in the final report and enforce the strongest textual exclusions instead.
+  logos, or anything the STEP 1a Adobe Stock rules forbid. REJECT IT ON DISTINCTIVENESS TOO
+  (rule 3 + GLOBAL DISTINCTIVENESS RULES 4): if the image came out as the default depiction of
+  its subject — the generic look already flooding Adobe Stock — or as a sibling of another
+  image from this run (same composition + same palette + similar scenario), it is a future
+  Adobe rejection: redesign the prompt with a genuinely new composition/palette/scenario and
+  generate a replacement; never save a lookalike just because the quota was spent on it.
+  Otherwise, when the prompt needs fixing, make the exclusion explicit (e.g. `no carved
+  faces`) and generate a replacement. If your runtime truly cannot view images, say so in the
+  final report and enforce the strongest textual exclusions instead.
 - Generate sequentially (one job at a time) — the queue is serialized server-side anyway.
 
 ## STEP 5 — Save each result (asset database API)
@@ -223,6 +342,12 @@ Confirm `pagination.total` equals the number of images you saved and every recor
 - compliance: the Adobe Stock rules you found and applied at STEP 1a (list your sources), plus
   every image you rejected at the visual check and the exact reason (face/body part, living
   being, text…)
+- distinctiveness: per image, its differentiation profile (the default depiction it avoids +
+  the composition/palette/mood/scenario decisions that make it stand out), the saturation
+  data from STEP 1c (approximate Adobe Stock result counts per candidate subject), and every
+  image you rejected at the distinctiveness check with the reason; end with an "upload first"
+  ranking — the images you judge strongest AND most distinct. Adobe rewards selective, varied
+  submissions: the owner should upload the best first, not mass-upload lookalikes.
 - anything the owner should know (e.g. quota messages, slow generations)
 
 ## If the APIs misbehave
