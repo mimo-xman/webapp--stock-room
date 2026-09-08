@@ -32,6 +32,12 @@
 import { BUNDLED_TEMPLATE_MAIN } from "./prompt-templates/main";
 import { BUNDLED_TEMPLATE_STOCK_PLATFORMS } from "./prompt-templates/stock-platforms";
 import { BUNDLED_TEMPLATE_COLORING_BOOK_ETSY } from "./prompt-templates/coloring-book-etsy";
+import { BUNDLED_TEMPLATE_ACTIVITY_BOOK_ETSY } from "./prompt-templates/activity-book-etsy";
+import { BUNDLED_TEMPLATE_PARTY_INVITATIONS_ETSY } from "./prompt-templates/party-invitations-etsy";
+import { BUNDLED_TEMPLATE_WALL_ART_SET_ETSY } from "./prompt-templates/wall-art-set-etsy";
+import { BUNDLED_TEMPLATE_PRINTABLE_SET_ETSY } from "./prompt-templates/printable-set-etsy";
+import { BUNDLED_TEMPLATE_CLIPART_BUNDLE_ETSY } from "./prompt-templates/clipart-bundle-etsy";
+import { BUNDLED_TEMPLATE_DIGITAL_DOWNLOAD_ETSY } from "./prompt-templates/digital-download-etsy";
 import { GLOBAL_CONTENT_RULES } from "./prompt-templates/global-content-rules";
 import { GLOBAL_DISTINCTIVENESS_RULES } from "./prompt-templates/global-distinctiveness-rules";
 
@@ -66,7 +72,7 @@ export interface PromptDefinition {
   /** Small chip shown on the switcher card + result header. */
   purpose: string;
   /** Icon key resolved by the page (keeps this file icon-free). */
-  icon: "sparkles" | "store" | "book";
+  icon: "sparkles" | "store" | "book" | "puzzle" | "mail" | "frame" | "clipboard" | "shapes" | "download";
   /** prompts/<file> on GitHub raw. */
   file: string;
   bundled: string;
@@ -192,6 +198,126 @@ export const PROMPTS: PromptDefinition[] = [
         label: "Number of coloring pages",
         help: "How many coloring pages to produce (cover is extra, always 1; the announcement images are extra too — the agent generates at least 4 of them automatically). The theme is NOT typed here — the agent researches Etsy's current demand and picks it itself, always a NON-LIVING theme (no animals, no people, no characters: the owner's global content rules).",
         placeholder: "20",
+        type: "number",
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "activity-book-etsy",
+    title: "Activity book — Etsy",
+    tagline: "Children's line-art activity pages (mazes, dot-to-dot, tracing, matching…) + cover + ANNOUNCEMENT images — mixed activity types, solvable puzzles, the agent researches Etsy demand and picks a NON-LIVING theme itself.",
+    purpose: "etsy",
+    icon: "puzzle",
+    file: "prompts/activity-book-etsy.md",
+    bundled: BUNDLED_TEMPLATE_ACTIVITY_BOOK_ETSY,
+    specificVars: [
+      {
+        key: "numberOfPages",
+        token: "[NUMBER OF ACTIVITY PAGES]",
+        label: "Number of activity pages",
+        help: "How many activity pages to produce (cover is extra, always 1; the announcement images are extra too — at least 4). The theme is NOT typed here — the agent researches Etsy's current demand and picks it itself, always a NON-LIVING theme, with at least four different activity types across the book.",
+        placeholder: "20",
+        type: "number",
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "party-invitations-etsy",
+    title: "Party invitations — Etsy",
+    tagline: "A cohesive set of fill-in 5×7 invitation designs + ANNOUNCEMENT images — the agent researches the occasion + theme (birthdays, showers…) and picks them itself, always NON-LIVING decorations.",
+    purpose: "etsy",
+    icon: "mail",
+    file: "prompts/party-invitations-etsy.md",
+    bundled: BUNDLED_TEMPLATE_PARTY_INVITATIONS_ETSY,
+    specificVars: [
+      {
+        key: "numberOfDesigns",
+        token: "[NUMBER OF INVITATION DESIGNS]",
+        label: "Number of invitation designs",
+        help: "How many card designs the set contains (each prints at 5×7 in; the announcement images are extra — at least 4). The occasion and theme are NOT typed here — the agent researches Etsy's current demand and picks them itself, always a NON-LIVING theme (balloons, vehicles, stars, flowers…).",
+        placeholder: "4",
+        type: "number",
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "wall-art-set-etsy",
+    title: "Wall art set — Etsy",
+    tagline: "A cohesive gallery of matching printable art prints + ANNOUNCEMENT images (styled frames, gallery-wall mockups built from the real prints) — the agent researches the style + theme and picks them itself, always NON-LIVING.",
+    purpose: "etsy",
+    icon: "frame",
+    file: "prompts/wall-art-set-etsy.md",
+    bundled: BUNDLED_TEMPLATE_WALL_ART_SET_ETSY,
+    specificVars: [
+      {
+        key: "numberOfPrints",
+        token: "[NUMBER OF ART PRINTS]",
+        label: "Number of art prints",
+        help: "How many matching prints the set contains (each prints at 8×10 in / A4 or larger; the announcement images are extra — at least 4). The style + theme are NOT typed here — the agent researches Etsy's current demand and picks them itself, always a NON-LIVING theme (botanicals, abstracts, landscapes, typography…).",
+        placeholder: "6",
+        type: "number",
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "printable-set-etsy",
+    title: "Printable set — Etsy",
+    tagline: "A functional printable system (chore charts, planners, trackers, bingo, gift tags…) + ANNOUNCEMENT images — usable layouts, perfect spelling, the agent researches the niche and designs the set itself, decorated with NON-LIVING accents only.",
+    purpose: "etsy",
+    icon: "clipboard",
+    file: "prompts/printable-set-etsy.md",
+    bundled: BUNDLED_TEMPLATE_PRINTABLE_SET_ETSY,
+    specificVars: [
+      {
+        key: "numberOfPages",
+        token: "[NUMBER OF PRINTABLE PAGES]",
+        label: "Number of printable pages",
+        help: "How many coordinated pages the set contains (each prints at US Letter 8.5×11 in; the announcement images are extra — at least 4). The niche is NOT typed here — the agent researches Etsy's current demand and picks the whole system itself, decorated with NON-LIVING accents only.",
+        placeholder: "10",
+        type: "number",
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "clipart-bundle-etsy",
+    title: "Clipart bundle — Etsy",
+    tagline: "A themed bundle of individual PNG clipart elements (isolated on pure white, one consistent style) + ANNOUNCEMENT sample sheets built from the real elements — the agent researches the theme + style and picks them itself, always NON-LIVING.",
+    purpose: "etsy",
+    icon: "shapes",
+    file: "prompts/clipart-bundle-etsy.md",
+    bundled: BUNDLED_TEMPLATE_CLIPART_BUNDLE_ETSY,
+    specificVars: [
+      {
+        key: "numberOfElements",
+        token: "[NUMBER OF CLIPART ELEMENTS]",
+        label: "Number of clipart elements",
+        help: "How many individual PNG elements the bundle contains (each is one isolated element; the announcement images are extra — at least 4). The theme + style are NOT typed here — the agent researches Etsy's current demand and picks them itself, always a NON-LIVING theme (flowers, vehicles, objects, symbols…).",
+        placeholder: "30",
+        type: "number",
+        required: true,
+      },
+    ],
+  },
+  {
+    id: "digital-download-etsy",
+    title: "Digital download — Etsy (any product)",
+    tagline: "The generic Etsy prompt: the agent researches what digital product sells right now, picks the product AND its product_type itself (templates, games, educational resources, cards, seasonal sets…), then applies the matching conventions — always NON-LIVING.",
+    purpose: "etsy",
+    icon: "download",
+    file: "prompts/digital-download-etsy.md",
+    bundled: BUNDLED_TEMPLATE_DIGITAL_DOWNLOAD_ETSY,
+    specificVars: [
+      {
+        key: "numberOfImages",
+        token: "[NUMBER OF PRODUCT IMAGES]",
+        label: "Number of product images",
+        help: "How many images make up the deliverable (the hero image + the other pieces; the announcement images are extra — at least 4). The product idea and its type are NOT typed here — the agent researches Etsy's current demand and picks them itself, always a NON-LIVING theme.",
+        placeholder: "12",
         type: "number",
         required: true,
       },
