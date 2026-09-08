@@ -181,7 +181,7 @@ export const api = {
     }): Promise<{ data: EtsyProduct }> {
       return request("/api/etsy-products", { method: "POST", body: JSON.stringify(payload) });
     },
-    update(id: string, patch: Partial<EtsyProduct>): Promise<{ data: EtsyProduct }> {
+    update(id: string, patch: Partial<Omit<EtsyProduct, "metadata" | "images">> & { metadata?: Partial<EtsyProductMetadata> }): Promise<{ data: EtsyProduct }> {
       return request(`/api/etsy-products/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
     },
     remove(id: string): Promise<{ data: { deleted: boolean } }> {
@@ -191,14 +191,21 @@ export const api = {
       return request(`/api/etsy-products/${id}/images`, { method: "POST", body: JSON.stringify(image) });
     },
 
-    /** Per-image edits: caption/role, pause & reactivate (active),
+    /** Per-image edits: caption/role/link, pause & reactivate (active),
      *  dismiss the batch-worker error message. */
     images: {
-      update(productId: string, imageId: string, patch: { role?: EtsyImageRole; caption?: string; active?: boolean; error_message?: string }): Promise<{ data: EtsyProduct }> {
+      update(productId: string, imageId: string, patch: { role?: EtsyImageRole; caption?: string; image_link?: string; active?: boolean; error_message?: string }): Promise<{ data: EtsyProduct }> {
         return request(`/api/etsy-products/${productId}/images/${imageId}`, {
           method: "PATCH",
           body: JSON.stringify(patch),
         });
+      },
+
+      /** Remove ONE image from a product (refused on the last one — an
+       *  Etsy product always needs at least one image). The server also
+       *  destroys the image's upscale assets on Cloudinary (best-effort). */
+      remove(productId: string, imageId: string): Promise<{ data: { deleted: boolean; imagesRemaining: number; upscalesDestroyed: number; cloudinary: { destroyed: number; kept: number } | null } }> {
+        return request(`/api/etsy-products/${productId}/images/${imageId}`, { method: "DELETE" });
       },
 
       /** Download one product image via the server proxy (avoids CORS /

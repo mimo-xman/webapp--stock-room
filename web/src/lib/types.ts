@@ -158,7 +158,7 @@ export type EtsyProductType =
   | "digital_download"
   | "other";
 
-export type EtsyImageRole = "cover" | "page" | "asset" | "preview";
+export type EtsyImageRole = "cover" | "page" | "asset" | "preview" | "marketing";
 
 export interface EtsyProductImage {
   _id?: string;

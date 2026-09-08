@@ -175,6 +175,24 @@ export function etsyProductTypeLabel(v: string): string {
   return ETSY_PRODUCT_TYPES.find((t) => t.value === v)?.label ?? v;
 }
 
+// ── Etsy image roles (mirror of the API's ETSY_IMAGE_ROLES) ─────────────────
+
+/** `marketing` = the ANNOUNCEMENT images: the Etsy listing photos that
+ *  present the product to buyers (mockups, "what's inside" collages, page
+ *  samples). They are NOT part of the deliverable — cover/pages/assets are —
+ *  but they upscale exactly like every other image. */
+export const ETSY_IMAGE_ROLES = [
+  { value: "cover", label: "Cover" },
+  { value: "page", label: "Page" },
+  { value: "asset", label: "Asset" },
+  { value: "preview", label: "Preview" },
+  { value: "marketing", label: "Marketing (announcement)" },
+] as const;
+
+export function etsyImageRoleLabel(v: string): string {
+  return ETSY_IMAGE_ROLES.find((r) => r.value === v)?.label ?? v;
+}
+
 // ── listing conventions ─────────────────────────────────────────────────────
 
 export const QUALITIES = ["1K", "2K", "4K"] as const;

@@ -33,7 +33,7 @@ export default function SessionsPage() {
       const res = await api.sessions.remove(toDelete._id);
       toast({
         title: "Session deleted",
-        description: `${res.data.imagesDeleted} image${res.data.imagesDeleted === 1 ? "" : "s"} removed with it.`,
+        description: `${res.data.imagesDeleted} image${res.data.imagesDeleted === 1 ? "" : "s"}${res.data.productsDeleted ? ` and ${res.data.productsDeleted} Etsy product${res.data.productsDeleted === 1 ? "" : "s"}` : ""} removed with it.`,
       });
       setToDelete(null);
       list.reload();
@@ -53,7 +53,9 @@ export default function SessionsPage() {
           <div>
             <h1 className="font-display text-3xl font-bold uppercase tracking-tight">Sessions</h1>
             <p className="font-mono text-xs text-ink-muted">
-              {list.pagination ? `${list.pagination.total} session${list.pagination.total === 1 ? "" : "s"} · ${rows.reduce((a, s) => a + s.imagesCount, 0)} images` : "…"}
+              {list.pagination
+                ? `${list.pagination.total} session${list.pagination.total === 1 ? "" : "s"} · ${rows.reduce((a, s) => a + s.imagesCount, 0)} images · ${rows.reduce((a, s) => a + (s.productsCount ?? 0), 0)} Etsy products`
+                : "…"}
             </p>
           </div>
           <button
@@ -129,9 +131,12 @@ export default function SessionsPage() {
                 <div className="flex items-center gap-2">
                   <span
                     className="flex items-center gap-1.5 border border-line-strong px-2 py-1 font-mono text-[11px] text-ink"
-                    title={`${s.usedCount ?? 0} marked as used`}
+                    title={`${s.imagesCount} sellable image(s) · ${s.productsCount ?? 0} Etsy product(s) · ${s.usedCount ?? 0} marked as used`}
                   >
                     {s.imagesCount} img
+                    <span className="text-brand">
+                      · {s.productsCount ?? 0} Etsy product{(s.productsCount ?? 0) === 1 ? "" : "s"}
+                    </span>
                     <span className="text-stamp">· {s.usedCount ?? 0} used</span>
                   </span>
                   <ChevronRight className="h-4 w-4 text-ink-muted transition-transform group-hover:translate-x-0.5" aria-hidden />
@@ -163,7 +168,7 @@ export default function SessionsPage() {
         title="Delete this session?"
         description={
           toDelete
-            ? `"${toDelete.title}" and its ${toDelete.imagesCount} image${toDelete.imagesCount === 1 ? "" : "s"} will be permanently deleted.`
+            ? `"${toDelete.title}" and its ${toDelete.imagesCount} image${toDelete.imagesCount === 1 ? "" : "s"}${toDelete.productsCount ? ` + ${toDelete.productsCount} Etsy product${toDelete.productsCount === 1 ? "" : "s"}` : ""} will be permanently deleted.`
             : ""
         }
         confirmLabel="Delete session"

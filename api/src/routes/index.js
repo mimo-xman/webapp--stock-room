@@ -99,6 +99,7 @@ router.delete('/api/etsy-products/:id', etsyProductController.remove);
 // etsy product images — per-image worker coordination + webapp edits
 // (nested images carry their own upscales, in_use / active / error_message).
 router.patch('/api/etsy-products/:id/images/:imageId', validate(etsyImageUpdateSchema), etsyProductController.updateImage);
+router.delete('/api/etsy-products/:id/images/:imageId', etsyProductController.removeImage);
 router.post('/api/etsy-products/:id/images/:imageId/release', validate(imageReleaseSchema), etsyProductController.releaseImage);
 router.get('/api/etsy-products/:id/images/:imageId/download', etsyProductController.downloadImage);
 

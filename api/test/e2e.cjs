@@ -732,6 +732,93 @@ async function main() {
     ok('etsy removeUpscale → 200 + deleted + upscalesRemaining:0',
       r.status === 200 && r.json.data.deleted === true && r.json.data.upscalesRemaining === 0, r.json);
 
+    // ── Etsy products: marketing (announcement) images ─────────────────────
+    console.log('─ etsy products: marketing images + per-image management');
+
+    r = await call('POST', `/api/etsy-products/${ep1}/images`, {
+      key: API_KEY,
+      body: {
+        image_link: 'https://cdn.example.com/woodland-promo-1.png',
+        role: 'marketing',
+        caption: 'Woodland Coloring Book — Promo 1: what is inside collage',
+        ratio: '1:1',
+        quality: '2K',
+      },
+    });
+    ok('append a marketing (announcement) image → 201 + role kept',
+      r.status === 201 && r.json.data.images.some((im) => im.role === 'marketing' && /Promo 1/.test(im.caption || '')), r.json);
+
+    r = await call('POST', `/api/etsy-products/${ep1}/images`, {
+      key: API_KEY,
+      body: { image_link: 'https://cdn.example.com/x.png', role: 'hero-shot' },
+    });
+    ok('append with an unknown role → 400 (enum includes marketing)',
+      r.status === 400 && /role/.test(JSON.stringify(r.json.error.details || [])));
+
+    r = await call('POST', '/api/etsy-products', {
+      key: API_KEY,
+      body: mkEtsyProduct('Garden Coloring Book', [
+        { image_link: 'https://cdn.example.com/garden-cover.png', role: 'cover' },
+        { image_link: 'https://cdn.example.com/garden-promo.png', role: 'marketing', caption: 'Garden — Promo 1' },
+      ]),
+    });
+    ok('create product with a marketing image inline → 201',
+      r.status === 201 && r.json.data.images.some((im) => im.role === 'marketing'));
+    const ep3 = r.json.data._id;
+    const ep3Marketing = r.json.data.images.find((im) => im.role === 'marketing')._id;
+    const ep3Cover = r.json.data.images.find((im) => im.role === 'cover')._id;
+
+    // PATCH product with ONLY images → 400: the array is not wholesale
+    // patchable (it would drop every nested _id / upscales / worker field).
+    r = await call('PATCH', `/api/etsy-products/${ep3}`, {
+      password: APP_PASSWORD,
+      body: { images: [{ image_link: 'https://cdn.example.com/replace-all.png', role: 'page' }] },
+    });
+    ok('PATCH product with only images → 400 (images managed via dedicated endpoints)',
+      r.status === 400 && r.json.error.code === 'VALIDATION_ERROR');
+
+    // per-image PATCH: image_link fix + role change
+    r = await call('PATCH', `/api/etsy-products/${ep3}/images/${ep3Marketing}`, {
+      password: APP_PASSWORD,
+      body: { image_link: 'https://cdn.example.com/garden-promo-fixed.png', role: 'marketing' },
+    });
+    ok('PATCH etsy image image_link → 200 + link replaced',
+      r.status === 200 && r.json.data.images.find((im) => im._id === ep3Marketing).image_link === 'https://cdn.example.com/garden-promo-fixed.png');
+
+    // DELETE image: not the last one → 200 + imagesRemaining
+    r = await call('DELETE', `/api/etsy-products/${ep3}/images/${ep3Marketing}`, { password: APP_PASSWORD });
+    ok('DELETE etsy image → 200 + deleted + imagesRemaining:1',
+      r.status === 200 && r.json.data.deleted === true && r.json.data.imagesRemaining === 1, r.json);
+
+    // DELETE the LAST image → 409 LAST_IMAGE
+    r = await call('DELETE', `/api/etsy-products/${ep3}/images/${ep3Cover}`, { password: APP_PASSWORD });
+    ok('DELETE the last etsy image → 409 LAST_IMAGE (product needs ≥ 1)',
+      r.status === 409 && r.json.error.code === 'LAST_IMAGE');
+
+    // DELETE unknown image → 404
+    r = await call('DELETE', `/api/etsy-products/${ep3}/images/000000000000000000000000`, { password: APP_PASSWORD });
+    ok('DELETE unknown etsy image → 404', r.status === 404);
+
+    // DELETE with a live upscale on the image → 200, the whole image
+    // (upscale included) is gone from the product. No public_id on the test
+    // upscale → Cloudinary is not even contacted (cloudinary: null).
+    r = await call('POST', `/api/etsy-products/${ep3}/images`, {
+      key: API_KEY,
+      body: { image_link: 'https://cdn.example.com/garden-page.png', role: 'page', caption: 'Garden — Page 1' },
+    });
+    const ep3Page = r.json.data.images[r.json.data.images.length - 1]._id;
+    r = await call('POST', `/api/etsy-products/${ep3}/images/${ep3Page}/upscales`, {
+      key: API_KEY,
+      body: { url: 'https://res.cloudinary.com/demo/garden_x4.png', scale: 4, model: 'RealESRGAN_x4plus' },
+    });
+    ok('marketing product: addUpscale on a page → 201', r.status === 201);
+    r = await call('DELETE', `/api/etsy-products/${ep3}/images/${ep3Page}`, { password: APP_PASSWORD });
+    ok('DELETE etsy image holding an upscale → 200 + entry + upscale gone',
+      r.status === 200 && r.json.data.deleted === true && r.json.data.imagesRemaining === 1, r.json);
+    r = await call('GET', `/api/etsy-products/${ep3}`, K);
+    ok('after DELETE the image (and its upscale) left the product',
+      r.json.data.images.length === 1 && !r.json.data.images.some((im) => im._id === ep3Page));
+
     // 404s & malformed ids
     r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5 } });
     await call('POST', `/api/etsy-products/${r.json.data.product_id}/images/${r.json.data.image_id}/release`, { key: API_KEY, body: { status: 'stopped' } });
@@ -771,7 +858,8 @@ async function main() {
 
     // exhaustion: claim every eligible etsy image (NO release — the claim
     // itself removes them from the eligible pool), then data:null.
-    // Pool at this point: ep1's 3 images + ep2's 2 = 5.
+    // Pool at this point: ep1's 4 images (3 + the appended marketing one)
+    // + ep2's 2 + ep3's 1 remaining cover = 7.
     const etsyClaimed = [];
     for (;;) {
       const res = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5 } });
@@ -782,7 +870,7 @@ async function main() {
       etsyClaimed.push(`${res.json.data.product_id}:${res.json.data.image_id}`);
     }
     ok(`etsy exhaustion loop: ${etsyClaimed.length} image claims, all distinct (no double reservation)`,
-      new Set(etsyClaimed).size === etsyClaimed.length && etsyClaimed.length === 5,
+      new Set(etsyClaimed).size === etsyClaimed.length && etsyClaimed.length === 7,
       { count: etsyClaimed.length });
 
     // pre-feature product: image sub-documents WITHOUT worker fields → still
@@ -824,6 +912,51 @@ async function main() {
     r = await call('POST', '/api/images/claim', { body: { max_upscales: 5 } });
     ok('claim without credentials → 401', r.status === 401 && r.json.error.code === 'AUTH_REQUIRED');
     await new Promise((resolve) => setTimeout(resolve, 450)); // let the brute-force block expire
+
+    // ── create with the FULL metadata route (the webapp "Add image" form) ──
+    // Runs LAST on purpose: it adds one more image, and every count-sensitive
+    // test above has already run. adobe_stock is the required base, the
+    // explicit shutterstock block is stored verbatim, the other platforms are
+    // derived from the Adobe block.
+    console.log('─ images: multi-platform metadata create (webapp form route)');
+    r = await call('POST', '/api/sessions', { key: API_KEY, body: { title: 'Webapp form probe session' } });
+    const sForm = r.json.data._id;
+    r = await call('POST', '/api/images', {
+      key: API_KEY,
+      body: {
+        session_id: sForm,
+        prompt: 'Multi-platform metadata create probe — brushed brass kettle on a teal counter',
+        ratio: '4:3',
+        quality: '2K',
+        image_link: 'https://cdn.example.com/kettle.png',
+        metadata: {
+          adobe_stock: {
+            title: 'Brushed brass kettle on a teal counter',
+            category: 'Drinks',
+            keywords: ['brass kettle', 'teal counter', 'kitchen still life', 'minimalism'],
+          },
+          shutterstock: {
+            description: 'A brushed brass kettle resting on a teal kitchen counter',
+            categories: ['Objects'],
+            keywords: ['brass kettle', 'teal counter', 'kitchen', 'still life', 'minimalism', 'metal', 'appliance'],
+          },
+        },
+      },
+    });
+    ok('create image with metadata (adobe + explicit shutterstock) → 201', r.status === 201, r.json);
+    if (r.status === 201) {
+      const md = r.json.data.metadata || {};
+      ok('explicit shutterstock block stored verbatim',
+        md.shutterstock && md.shutterstock.description.startsWith('A brushed brass kettle') &&
+        Array.isArray(md.shutterstock.categories) && md.shutterstock.categories[0] === 'Objects');
+      ok('missing platforms derived from the Adobe block (e.g. dreamstime title)',
+        md.dreamstime && md.dreamstime.title === 'Brushed brass kettle on a teal counter');
+      ok('adobe block stored', md.adobe_stock && md.adobe_stock.category === 'Drinks');
+      ok('legacy flat projections derived (title / category / keywords)',
+        r.json.data.title === 'Brushed brass kettle on a teal counter' &&
+        r.json.data.category === 'Drinks' &&
+        Array.isArray(r.json.data.keywords) && r.json.data.keywords.length === 4);
+    }
 
     // ── summary ─────────────────────────────────────────────────────────────
     console.log(`\n══ ${passed} passed, ${failed} failed`);

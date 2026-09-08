@@ -9,8 +9,8 @@
  *   {
  *     session_id,
  *     product_type: 'coloring_book' | 'party_invitations' | …,
- *     images: [ { image_link, role: cover|page|asset|preview, caption,
- *                 ratio, quality, upscales: [],
+ *     images: [ { image_link, role: cover|page|asset|preview|marketing,
+ *                 caption, ratio, quality, upscales: [],
  *                 active, in_use, in_use_at, error_message } ],
  *     metadata: { title, description, tags: [], category, price, … },
  *     file_link,        // optional ready deliverable (PDF / ZIP)
@@ -18,13 +18,18 @@
  *     createdAt, updatedAt,
  *   }
  *
+ * `marketing` images are the ANNOUNCEMENT images: the listing photos that
+ * present the product on Etsy (mockups, "what's inside" collages, samples).
+ * They are generated alongside the product images and upscale exactly like
+ * every other image in the array.
+ *
  * Etsy listing limits (official, validated at the API layer):
  *   title ≤ 140 chars · 13 tags max, each ≤ 20 chars · price ≥ $0.20.
  * `category` is a free-text Etsy taxonomy path — the taxonomy tree is too
  * large to embed, so the generation agent researches and picks the path.
  */
 const mongoose = require('mongoose');
-const { UPSCALE_SOURCES, ETSY_PRODUCT_TYPES } = require('../constants');
+const { UPSCALE_SOURCES, ETSY_PRODUCT_TYPES, ETSY_IMAGE_ROLES } = require('../constants');
 
 const HTTP_URL_RE = /^https?:\/\//;
 
@@ -42,7 +47,7 @@ const productImageSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['cover', 'page', 'asset', 'preview'],
+      enum: ETSY_IMAGE_ROLES,
       default: 'page',
     },
     caption: {

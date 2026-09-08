@@ -180,7 +180,7 @@ export const PROMPTS: PromptDefinition[] = [
   {
     id: "coloring-book-etsy",
     title: "Coloring book — Etsy",
-    tagline: "Children's line-art coloring pages + cover — the agent researches Etsy demand and picks a NON-LIVING theme itself (the owner's content rules: no living beings, no faces, no body parts).",
+    tagline: "Children's line-art coloring pages + cover + the book's ANNOUNCEMENT images (the Etsy listing photos that sell it) — the agent researches Etsy demand and picks a NON-LIVING theme itself (the owner's content rules: no living beings, no faces, no body parts).",
     purpose: "etsy",
     icon: "book",
     file: "prompts/coloring-book-etsy.md",
@@ -190,7 +190,7 @@ export const PROMPTS: PromptDefinition[] = [
         key: "numberOfPages",
         token: "[NUMBER OF COLORING PAGES]",
         label: "Number of coloring pages",
-        help: "How many coloring pages to produce (cover is extra, always 1). The theme is NOT typed here — the agent researches Etsy's current demand and picks it itself, always a NON-LIVING theme (no animals, no people, no characters: the owner's global content rules).",
+        help: "How many coloring pages to produce (cover is extra, always 1; the announcement images are extra too — the agent generates at least 4 of them automatically). The theme is NOT typed here — the agent researches Etsy's current demand and picks it itself, always a NON-LIVING theme (no animals, no people, no characters: the owner's global content rules).",
         placeholder: "20",
         type: "number",
         required: true,

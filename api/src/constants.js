@@ -197,6 +197,13 @@ const ETSY_PRODUCT_TYPES = [
   'other',
 ];
 
+/** Roles an image can play inside an Etsy product. `marketing` = the
+ * ANNOUNCEMENT images — the listing photos that present the product to the
+ * buyer and drive the purchase (mockups, "what's inside" collages, page
+ * samples…). They are NOT part of the deliverable: cover/pages/assets are.
+ * Every role is eligible for the Real-ESRGAN upscale batches. */
+const ETSY_IMAGE_ROLES = ['cover', 'page', 'asset', 'preview', 'marketing'];
+
 // Etsy listing limits (official): title ≤ 140 chars, 13 tags ≤ 20 chars each.
 const ETSY_TITLE_MAX = 140;
 const ETSY_TAGS_MAX = 13;
@@ -251,6 +258,7 @@ module.exports = {
   SHUTTERSTOCK_CATEGORIES,
   ADOBE_TO_SHUTTERSTOCK_CATEGORY,
   ETSY_PRODUCT_TYPES,
+  ETSY_IMAGE_ROLES,
   ETSY_TITLE_MAX,
   ETSY_TAGS_MAX,
   ETSY_TAG_MAX_LEN,

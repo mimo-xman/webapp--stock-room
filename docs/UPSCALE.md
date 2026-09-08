@@ -136,6 +136,10 @@ Chaque tentative d'un worker se termine TOUJOURS par un `release` :
 Même machine, mêmes inputs, mêmes secrets que 2.1 — mais pour les images
 **imbriquées dans les produits Etsy** (`etsy_products.images[]`) :
 
+- **Toutes les images d'un produit sont éligibles** — cover, pages,
+  assets/previews ET les images d'annonce (`role: "marketing"`, les photos de
+  fiche qui vendent le produit) : le claim ne filtre pas par rôle, seule la
+  politique compte (upscales < max, active, libre).
 - **Quotidien à 10:00 Maroc** — cron `0 9 * * *` (UTC). Le décalage de 2 h
   avec le lot images évite que les deux workflows réveillent l'API Render
   (free tier) en même temps et se partagent les 300 req/min de rate-limit.
@@ -153,6 +157,13 @@ Même machine, mêmes inputs, mêmes secrets que 2.1 — mais pour les images
   `POST /api/etsy-products/:id/images/:imageId/release`.
 - `dry_run` liste les images de produits éligibles (une ligne par image, du
   style `Titre du livre — Page 1`).
+
+> **NB — `_id` des images de produit** : chaque image imbriquée DOIT porter
+> un `_id` (le claim, les upscales, la pause et le download l'utilisent).
+> Mongoose le génère automatiquement à la création ; l'ancienne migration
+> (`migrate-to-multiplatform.cjs`) ne le faisait pas — corrigé depuis, et
+> `api/scripts/backfill-etsy-image-ids.cjs` répare les données existantes
+> (déjà exécuté sur la base de production le 2026-09-08).
 
 ### 2.2 `Upscale — single image` (`.github/workflows/upscale-single.yml`)
 
@@ -262,7 +273,8 @@ Champs de coordination des workers parallèles (voir §2.1.1) :
 |---|---|---|
 | `POST` | `/api/etsy-products/claim` | Réservation atomique d'**une image de produit** éligible. Réponse `{ data: { product_id, image_id, image_index, product, image } \| null, claimed, max_upscales }` |
 | `POST` | `/api/etsy-products/:id/images/:imageId/release` | Fin de tentative sur cette image — même sémantique ok/stopped/error |
-| `PATCH` | `/api/etsy-products/:id/images/:imageId` | Edition webapp d'une image de produit — `{ role?, caption?, active?, error_message? }` |
+| `PATCH` | `/api/etsy-products/:id/images/:imageId` | Edition webapp d'une image de produit — `{ role?, caption?, image_link?, active?, error_message? }` |
+| `DELETE` | `/api/etsy-products/:id/images/:imageId` | Retirer l'image du produit (+ destruction Cloudinary best-effort de ses upscales ; refus 409 `LAST_IMAGE` sur la dernière image) |
 | `GET` | `/api/etsy-products/:id/images/:imageId/download` | Proxy de téléchargement de l'image (nommage `<slug-produit>-<slug-page>`) |
 | `POST` | `/api/etsy-products/:id/images/:imageId/upscales` | Enregistrer une variante sur cette image — 409 à la limite |
 | `PATCH` | `/api/etsy-products/:id/images/:imageId/upscales/:upscaleId` | « Mark used » d'une variante |

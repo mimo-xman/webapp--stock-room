@@ -489,8 +489,9 @@ async function releaseImage(req, res, next) {
 
 /**
  * PATCH /api/etsy-products/:id/images/:imageId
- * Edit one product image from the webapp: caption / role, and the worker
- * fields — active (pause & reactivate) and error_message (dismiss).
+ * Edit one product image from the webapp: caption / role / image_link, and
+ * the worker fields — active (pause & reactivate) and error_message
+ * (dismiss).
  */
 async function updateImage(req, res, next) {
   try {
@@ -498,6 +499,64 @@ async function updateImage(req, res, next) {
     Object.assign(image, req.validated);
     await product.save();
     res.json({ data: toPlain(product) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /api/etsy-products/:id/images/:imageId
+ * Remove ONE image from a product (webapp edit form). Every upscale entry
+ * of that image is destroyed on Cloudinary too (best-effort — same hygiene
+ * as DELETE …/upscales/:upscaleId). Refuses to remove the LAST image: an
+ * Etsy product always needs at least one (create-time contract).
+ */
+async function removeImage(req, res, next) {
+  try {
+    assertIds(req.params.id, req.params.imageId);
+    const { product, image } = await loadProductImage(req.params.id, req.params.imageId);
+
+    if (product.images.length <= 1) {
+      throw new HttpError(
+        409,
+        'LAST_IMAGE',
+        'An Etsy product needs at least one image — delete the product itself instead'
+      );
+    }
+
+    const upscales = Array.isArray(image.upscales) ? image.upscales : [];
+    image.deleteOne();
+    await product.save();
+
+    // Best-effort Cloudinary cleanup for the upscale derivatives of the
+    // removed image (the ORIGINAL image file is not ours to delete).
+    const destroyed = [];
+    const kept = [];
+    for (const u of upscales) {
+      if (u.public_id) {
+        try {
+          const result = await destroyAsset(u.public_id);
+          if (result.destroyed) destroyed.push(String(u._id));
+          else kept.push({ id: String(u._id), note: result.error || result.result || 'not destroyed' });
+        } catch (e) {
+          kept.push({ id: String(u._id), note: String(e && e.message ? e.message : e) });
+        }
+      }
+    }
+    if (kept.length) {
+      console.warn(
+        `[api] etsy image ${req.params.imageId}: DB entry removed, ${kept.length} remote asset(s) kept — ${kept.map((k) => k.note).join('; ')}`
+      );
+    }
+
+    res.json({
+      data: {
+        deleted: true,
+        imagesRemaining: product.images.length,
+        upscalesDestroyed: destroyed.length,
+        cloudinary: destroyed.length + kept.length > 0 ? { destroyed: destroyed.length, kept: kept.length } : null,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -675,6 +734,7 @@ module.exports = {
   claim,
   releaseImage,
   updateImage,
+  removeImage,
   downloadImage,
   addUpscale,
   updateUpscale,

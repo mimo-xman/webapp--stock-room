@@ -332,6 +332,16 @@ Metadata rules:
   title ≤ 140, 13 tags ≤ 20 chars, category, price, description) and
   `POST /api/etsy-products/:id/images` to append each new image. See the coloring-book
   prompt for the full flow.
+- **Etsy products need ANNOUNCEMENT images too** (every product type, not only coloring
+  books): a product that will be SOLD is two things — the deliverable (its images, with
+  `role` cover / page / asset / preview) and the MARKETING images that present it on the
+  Etsy listing and convince the buyer (`role: "marketing"`). Generate at least 4 of them
+  per product, each on a DIFFERENT selling angle (styled product shot, "what is inside"
+  collage, close-up on the quality, "what you receive" visual), at the HIGHEST visual
+  quality — buyers click (or scroll past) because of these photos. Append them with
+  `POST /api/etsy-products/:id/images` and `"role": "marketing"`, captioned
+  `"<product title> — Promo <M>: <angle>"`. The GLOBAL CONTENT RULES apply to them
+  exactly like to every other image.
 - Do not set `used` flags — only the owner marks images as used per platform, from the
   webapp.
 
@@ -412,9 +422,10 @@ Auth: header `X-API-Key: [STOCK ROOM API KEY]`.
 | `DELETE /api/images/:id` | Delete one image |
 | `GET /api/images/:id/download` | Download the image file (proxied) |
 | `POST /api/etsy-products` | Create an Etsy product (images[] + one shared listing metadata block) — for bundled missions |
-| `POST /api/etsy-products/:id/images` | Append ONE image to an Etsy product |
+| `POST /api/etsy-products/:id/images` | Append ONE image to an Etsy product (a deliverable image, or an announcement image with `role: "marketing"`) |
 | `GET /api/etsy-products` | List Etsy products (`session_id`, `product_type`, `used_in_etsy`, …) |
 | `GET /api/etsy-products/:id` | One product (all its images + metadata) |
+| `PATCH /api/etsy-products/:id` | Edit product fields (metadata merge, `product_type`, `file_link`, `used_in_etsy`) |
 
 Note: images can gain `upscales[]` entries (Real-ESRGAN ×2/×4, uploaded to Cloudinary)
 from the daily GitHub Actions job — you never create them. The same goes for the

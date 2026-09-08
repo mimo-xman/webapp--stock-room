@@ -1,19 +1,30 @@
 "use client";
 
 /**
- * Session detail — the batch's images (contact sheet) + session actions.
+ * Session detail — everything a production batch holds:
+ *
+ *   · sellable IMAGES (images_to_bay) — contact sheet, CSV selection;
+ *   · ETSY PRODUCTS (etsy_products) — their own grid + their own detail
+ *     dialog (the owner's spec: a session can hold BOTH kinds).
+ *
+ * Add buttons: one per kind ("Add image" / "Add Etsy product") — each opens
+ * the form specific to what it creates. Product cards open the Etsy detail
+ * popup, image cards open the image detail popup.
  */
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Plus, Trash2, Images } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Images, Store } from "lucide-react";
 import { TopBar } from "@/components/app/TopBar";
 import { FilterBar } from "@/components/app/FilterBar";
 import { PaginationBar } from "@/components/app/PaginationBar";
 import { ImageGrid } from "@/components/app/ImageGrid";
 import { ImageDetailDialog } from "@/components/app/ImageDetailDialog";
 import { ImageFormDialog } from "@/components/app/ImageFormDialog";
+import { EtsyProductDetailDialog } from "@/components/app/EtsyProductDetailDialog";
+import { EtsyProductFormDialog } from "@/components/app/EtsyProductFormDialog";
+import { EtsyProductGrid } from "@/components/app/EtsyProductGrid";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { EmptyState } from "@/components/app/EmptyState";
 import { useList, useSessionOptions } from "@/hooks/use-list";
@@ -24,7 +35,7 @@ import { IMAGE_SORTS } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { SelectionBar } from "@/components/app/SelectionBar";
 import { CsvPlatformDialog } from "@/components/app/CsvPlatformDialog";
-import type { Session, StockImage } from "@/lib/types";
+import type { Session, StockImage, EtsyProduct } from "@/lib/types";
 
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -34,6 +45,7 @@ export default function SessionDetailPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
 
+  // ── sellable images of this session ──
   const list = useList((p) => api.images.list({ ...p, filters: { ...p.filters, session_id: id } }), {
     filters: { session_id: id },
   });
@@ -41,9 +53,18 @@ export default function SessionDetailPage() {
   const csvSel = useCsvSelection();
   const [csvDialogOpen, setCsvDialogOpen] = useState(false);
 
+  // ── Etsy products of this session ──
+  const productList = useList((p) => api.etsyProducts.list({ ...p, filters: { ...p.filters, session_id: id } }), {
+    filters: { session_id: id },
+    limit: 20,
+  });
+
   const [detail, setDetail] = useState<StockImage | null>(null);
   const [editing, setEditing] = useState<StockImage | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [productDetail, setProductDetail] = useState<EtsyProduct | null>(null);
+  const [editingProduct, setEditingProduct] = useState<EtsyProduct | null>(null);
+  const [productFormOpen, setProductFormOpen] = useState(false);
   const [confirmDeleteSession, setConfirmDeleteSession] = useState(false);
   const [thunk, setThunk] = useState(0);
 
@@ -59,13 +80,18 @@ export default function SessionDetailPage() {
     return () => {
       alive = false;
     };
-  }, [id, list.nonce]);
+  }, [id, list.nonce, productList.nonce]);
 
   const images = list.items as StockImage[];
+  const products = productList.items as EtsyProduct[];
 
   function openDetail(image: StockImage) {
     // refresh the row's data in the dialog from the list state
     setDetail(images.find((i) => i._id === image._id) || image);
+  }
+
+  function openProductDetail(product: EtsyProduct) {
+    setProductDetail(products.find((p) => p._id === product._id) || product);
   }
 
   /** Quick stamp: not used anywhere → mark Adobe Stock (the primary);
@@ -108,12 +134,35 @@ export default function SessionDetailPage() {
     });
   }
 
+  function handleProductUpdate(updated: EtsyProduct) {
+    setProductDetail((d) => (d && d._id === updated._id ? updated : d));
+    setEditingProduct((e) => (e && e._id === updated._id ? updated : e));
+    productList.patchLocal(updated._id, {
+      used_in_etsy: updated.used_in_etsy,
+      metadata: updated.metadata,
+      images: updated.images,
+    });
+  }
+
   async function deleteImage(image: StockImage) {
     try {
       await api.images.remove(image._id);
       setDetail(null);
       toast({ title: "Image deleted", description: image.title });
       list.reload();
+      api.sessions.get(id).then((r) => setSession(r.data)).catch(() => {});
+    } catch {
+      toast({ variant: "destructive", title: "Delete failed", description: "Try again in a moment." });
+    }
+  }
+
+  async function deleteProduct(product: EtsyProduct) {
+    try {
+      await api.etsyProducts.remove(product._id);
+      setProductDetail(null);
+      toast({ title: "Product deleted", description: product.metadata.title });
+      productList.reload();
+      api.sessions.get(id).then((r) => setSession(r.data)).catch(() => {});
     } catch {
       toast({ variant: "destructive", title: "Delete failed", description: "Try again in a moment." });
     }
@@ -139,6 +188,10 @@ export default function SessionDetailPage() {
     }
   }
 
+  function refreshSessionHeader() {
+    api.sessions.get(id).then((r) => setSession(r.data)).catch(() => {});
+  }
+
   if (sessionError) {
     return (
       <>
@@ -152,6 +205,8 @@ export default function SessionDetailPage() {
       </>
     );
   }
+
+  const hasProducts = products.length > 0 || (session?.productsCount ?? 0) > 0;
 
   return (
     <>
@@ -171,11 +226,11 @@ export default function SessionDetailPage() {
             </h1>
             <p className="mt-1 font-mono text-xs text-ink-muted">
               {session
-                ? `created ${formatDateTime(session.createdAt)} · ${session.imagesCount} images · ${session.usedCount ?? 0} used${session.productsCount ? ` · ${session.productsCount} Etsy product${session.productsCount === 1 ? "" : "s"}` : ""}`
+                ? `created ${formatDateTime(session.createdAt)} · ${session.imagesCount} image${session.imagesCount === 1 ? "" : "s"}${session.productsCount ? ` · ${session.productsCount} Etsy product${session.productsCount === 1 ? "" : "s"}` : ""} · ${session.usedCount ?? 0} used`
                 : "…"}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => {
@@ -189,6 +244,17 @@ export default function SessionDetailPage() {
             </button>
             <button
               type="button"
+              onClick={() => {
+                setEditingProduct(null);
+                setProductFormOpen(true);
+              }}
+              className="flex h-10 items-center gap-2 border border-brand/50 bg-surface px-4 font-display text-sm font-bold uppercase tracking-widest text-brand transition-colors hover:border-brand hover:bg-brand-soft focus-visible:outline-2 focus-visible:outline-brand"
+            >
+              <Store className="h-4 w-4" aria-hidden />
+              Add Etsy product
+            </button>
+            <button
+              type="button"
               onClick={() => setConfirmDeleteSession(true)}
               className="flex h-10 items-center gap-2 border border-danger/40 bg-surface px-4 font-display text-sm font-semibold uppercase tracking-widest text-danger transition-colors hover:border-danger hover:bg-danger-soft focus-visible:outline-2 focus-visible:outline-brand"
             >
@@ -198,65 +264,138 @@ export default function SessionDetailPage() {
           </div>
         </div>
 
-        <FilterBar
-          params={list.params}
-          onChange={list.updateParams}
-          onFilter={list.updateFilter}
-          onReset={list.reset}
-          searchPlaceholder="Search this session…"
-          sortOptions={IMAGE_SORTS}
-          hideSearch={false}
-        />
-
-        {list.error && (
-          <p className="border border-danger bg-danger-soft px-4 py-3 text-sm text-danger" role="alert">{list.error}</p>
-        )}
-
-        {list.loading ? (
-          <ImageGrid images={[]} loading onOpen={openDetail} onToggleUsed={toggleUsed} />
-        ) : images.length === 0 ? (
-          <EmptyState
-            icon={<Images className="h-6 w-6" aria-hidden />}
-            title={list.params.search ? "No image matches" : "No images in this session"}
-            hint={
-              list.params.search
-                ? "Try another search."
-                : "Agent runs register generated images here. You can also add one manually."
-            }
-            action={
-              <button
-                type="button"
-                onClick={() => {
-                  setEditing(null);
-                  setFormOpen(true);
-                }}
-                className="flex h-10 items-center gap-2 bg-brand px-4 font-display text-sm font-bold uppercase tracking-widest text-white transition-colors hover:bg-brand-deep"
-              >
-                <Plus className="h-4 w-4" aria-hidden />
-                Add the first image
-              </button>
-            }
+        {/* ── sellable images ── */}
+        <section className="space-y-3">
+          <h2 className="eyebrow">
+            Images — {session ? `${session.imagesCount}` : "…"}
+            <span className="ml-2 font-mono text-[10px] normal-case tracking-normal text-ink-muted">
+              sold one by one on the stock marketplaces
+            </span>
+          </h2>
+          <FilterBar
+            params={list.params}
+            onChange={list.updateParams}
+            onFilter={list.updateFilter}
+            onReset={list.reset}
+            searchPlaceholder="Search this session…"
+            sortOptions={IMAGE_SORTS}
+            hideSearch={false}
           />
-        ) : (
-          <ImageGrid
-            images={images}
-            onOpen={openDetail}
-            onToggleUsed={toggleUsed}
-            thunkKey={thunk}
-            selectionFor={(image) => ({
-              selected: csvSel.isSelected(image._id),
-              onToggle: (img) => csvSel.toggle(img),
-            })}
-          />
-        )}
 
-        <PaginationBar pagination={list.pagination} onChange={list.updateParams} />
+          {list.error && (
+            <p className="border border-danger bg-danger-soft px-4 py-3 text-sm text-danger" role="alert">{list.error}</p>
+          )}
+
+          {list.loading ? (
+            <ImageGrid images={[]} loading onOpen={openDetail} onToggleUsed={toggleUsed} />
+          ) : images.length === 0 ? (
+            <EmptyState
+              icon={<Images className="h-6 w-6" aria-hidden />}
+              title={list.params.search ? "No image matches" : hasProducts ? "No sellable images in this session" : "No images in this session"}
+              hint={
+                list.params.search
+                  ? "Try another search."
+                  : hasProducts
+                    ? "This session holds Etsy products (below) — agent runs register sellable images here, or add one manually."
+                    : "Agent runs register generated images here. You can also add one manually."
+              }
+              action={
+                !list.params.search && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditing(null);
+                      setFormOpen(true);
+                    }}
+                    className="flex h-10 items-center gap-2 bg-brand px-4 font-display text-sm font-bold uppercase tracking-widest text-white transition-colors hover:bg-brand-deep"
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
+                    Add the first image
+                  </button>
+                )
+              }
+            />
+          ) : (
+            <ImageGrid
+              images={images}
+              onOpen={openDetail}
+              onToggleUsed={toggleUsed}
+              thunkKey={thunk}
+              selectionFor={(image) => ({
+                selected: csvSel.isSelected(image._id),
+                onToggle: (img) => csvSel.toggle(img),
+              })}
+            />
+          )}
+
+          <PaginationBar pagination={list.pagination} onChange={list.updateParams} />
+        </section>
 
         <SelectionBar
           count={csvSel.count}
           onDownload={downloadCsv}
           onClear={csvSel.clear}
         />
+
+        {/* ── Etsy products ── */}
+        <section className="space-y-3 border-t border-line pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="eyebrow">
+              Etsy products — {session ? `${session.productsCount ?? 0}` : "…"}
+              <span className="ml-2 font-mono text-[10px] normal-case tracking-normal text-ink-muted">
+                digital products: several images behind one listing
+              </span>
+            </h2>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingProduct(null);
+                setProductFormOpen(true);
+              }}
+              className="flex h-9 items-center gap-1.5 bg-brand px-3 font-display text-xs font-bold uppercase tracking-widest text-white transition-colors hover:bg-brand-deep focus-visible:outline-2 focus-visible:outline-brand"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              Add product
+            </button>
+          </div>
+
+          {productList.error && (
+            <p className="border border-danger bg-danger-soft px-4 py-3 text-sm text-danger" role="alert">{productList.error}</p>
+          )}
+
+          {productList.loading ? (
+            <EtsyProductGrid products={[]} loading />
+          ) : products.length === 0 ? (
+            <EmptyState
+              icon={<Store className="h-6 w-6" aria-hidden />}
+              title={productList.params.search ? "No product matches" : "No Etsy products in this session"}
+              hint={
+                productList.params.search
+                  ? "Try another search."
+                  : "Etsy agent runs register their products here (coloring books, invitations…) — or add one manually."
+              }
+              action={
+                !productList.params.search && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingProduct(null);
+                      setProductFormOpen(true);
+                    }}
+                    className="flex h-10 items-center gap-2 bg-brand px-4 font-display text-sm font-bold uppercase tracking-widest text-white transition-colors hover:bg-brand-deep"
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
+                    Add the first Etsy product
+                  </button>
+                )
+              }
+            />
+          ) : (
+            <EtsyProductGrid products={products} onOpen={openProductDetail} />
+          )}
+
+          <PaginationBar pagination={productList.pagination} onChange={productList.updateParams} />
+        </section>
       </main>
 
       <CsvPlatformDialog
@@ -265,6 +404,7 @@ export default function SessionDetailPage() {
         items={csvSel.list}
       />
 
+      {/* ── image detail (specific to Images to buy) ── */}
       <ImageDetailDialog
         image={detail}
         onClose={() => setDetail(null)}
@@ -281,6 +421,20 @@ export default function SessionDetailPage() {
         sessionTitle={session?.title}
       />
 
+      {/* ── product detail (specific to Etsy products) ── */}
+      <EtsyProductDetailDialog
+        product={productDetail}
+        onClose={() => setProductDetail(null)}
+        onProductUpdate={handleProductUpdate}
+        onEdit={(p) => {
+          setProductDetail(null);
+          setEditingProduct(p);
+          setProductFormOpen(true);
+        }}
+        onDelete={deleteProduct}
+        sessionTitle={session?.title}
+      />
+
       <ImageFormDialog
         open={formOpen}
         onOpenChange={setFormOpen}
@@ -289,7 +443,20 @@ export default function SessionDetailPage() {
         sessionOptions={sessionOptions}
         onSaved={() => {
           list.reload();
-          api.sessions.get(id).then((r) => setSession(r.data)).catch(() => {});
+          refreshSessionHeader();
+        }}
+      />
+
+      <EtsyProductFormDialog
+        open={productFormOpen}
+        onOpenChange={setProductFormOpen}
+        product={editingProduct}
+        fixedSessionId={id}
+        sessionOptions={sessionOptions}
+        onSaved={(saved) => {
+          handleProductUpdate(saved);
+          productList.reload();
+          refreshSessionHeader();
         }}
       />
 

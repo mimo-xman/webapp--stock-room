@@ -162,12 +162,20 @@ function imageToProductEntry(im) {
   const title = String(im.title || '');
   const isCover = /cover/i.test(title);
   return {
+    // REQUIRED: the raw driver does NOT auto-generate sub-document _ids
+    // (Mongoose does). Without it every per-image feature keyed on
+    // images._id breaks — claim, upscales, pause, download (fixed
+    // retroactively by backfill-etsy-image-ids.cjs, never again here).
+    _id: new ObjectId(),
     image_link: im.image_link,
     role: isCover ? 'cover' : 'page',
     caption: clip(title, 200),
     ratio: im.ratio || '',
     quality: im.quality || '',
     upscales: (im.upscales || []).map((u) => ({
+      // the migrated upscale entries keep their ORIGINAL _id: they already
+      // exist in the DB history and stay addressable.
+      ...(u._id ? { _id: u._id } : { _id: new ObjectId() }),
       url: u.url,
       public_id: u.public_id || '',
       scale: u.scale,

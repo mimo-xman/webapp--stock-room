@@ -3,12 +3,14 @@
 /**
  * Image form dialog — add a new image record or edit an existing one.
  *
- * CREATE: fill the Adobe Stock fields (title / category / keywords) — the API
- * stores them as metadata.adobe_stock and auto-derives the 7 other platforms.
+ * CREATE: the same form as the edit one — a platform tab selector where the
+ * Adobe Stock block (title / category / keywords) is the required BASE and
+ * every other platform tab is optional (fill it to store the REAL values for
+ * that platform; the API derives the missing ones from the Adobe block).
  *
- * EDIT: a platform tab selector — the active tab edits THAT platform's
- * metadata block (title/description/categories/keywords per its own format
- * and caps); other blocks are left untouched.
+ * EDIT: the active tab edits THAT platform's metadata block
+ * (title/description/categories/keywords per its own format and caps); other
+ * blocks are left untouched.
  *
  * Client-side validation mirrors the server's zod rules.
  */
@@ -33,7 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api, ApiError } from "@/lib/api";
-import { CATEGORIES, PLATFORMS, RATIOS, SHUTTERSTOCK_CATEGORIES } from "@/lib/constants";
+import { CATEGORIES, PLATFORMS, PLATFORM_IDS, RATIOS, SHUTTERSTOCK_CATEGORIES } from "@/lib/constants";
 import { parseKeywords } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 import type { PlatformId, Quality, StockImage } from "@/lib/types";
@@ -123,6 +125,10 @@ export function ImageFormDialog({
   const [saving, setSaving] = useState(false);
   const editing = !!image;
 
+  /** Per-platform drafts (tab switching) — declared before the reset block
+   *  because the reset clears them. */
+  const [drafts, setDrafts] = useState<Partial<Record<PlatformId, PlatformForm>>>({});
+
   // Reset the form when the dialog opens (adjust-state-during-render pattern).
   const [prevOpen, setPrevOpen] = useState(open);
   const [prevImage, setPrevImage] = useState<StockImage | null>(image);
@@ -131,6 +137,7 @@ export function ImageFormDialog({
     setPrevImage(image);
     if (open) {
       setErrors({});
+      setDrafts({});
       if (image) {
         setPlatform("adobe_stock");
         setForm({
@@ -142,6 +149,7 @@ export function ImageFormDialog({
           quality: image.quality as Quality,
         });
       } else {
+        setPlatform("adobe_stock");
         setForm({ ...EMPTY_PLATFORM, session_id: fixedSessionId || "", prompt: "", image_link: "", ratio: "1:1", quality: "1K" });
       }
     }
@@ -156,12 +164,11 @@ export function ImageFormDialog({
   }
 
   /** Switch platform tab — save the current block into a draft map, load the
-   *  new one from the image (or the draft). */
-  const [drafts, setDrafts] = useState<Partial<Record<PlatformId, PlatformForm>>>({});
+   *  new one from the image (edit) or from the draft / empty (create). */
   function switchPlatform(next: PlatformId) {
+    setDrafts((d) => ({ ...d, [platform]: { ...form } }));
+    const draft = drafts[next];
     if (editing) {
-      setDrafts((d) => ({ ...d, [platform]: { ...form } }));
-      const draft = drafts[next];
       const fromImage = loadPlatformForm(image, next);
       setForm((f) => ({
         ...f,
@@ -175,9 +182,46 @@ export function ImageFormDialog({
           price: fromImage.price,
         }),
       }));
+    } else {
+      setForm((f) => ({ ...f, ...(draft ?? { ...EMPTY_PLATFORM }) }));
     }
     setPlatform(next);
     setErrors({});
+  }
+
+  /** True when a create-mode draft block carries any user content (also
+   *  narrows the type for the save path). */
+  function draftFilled(d: PlatformForm | undefined): d is PlatformForm {
+    if (!d) return false;
+    return Boolean(
+      d.title.trim() || d.description.trim() || d.category || d.ssPrimary ||
+      d.ssSecondary || d.keywords.trim() || d.price.trim(),
+    );
+  }
+
+  /** Validate one platform block (form or draft) — returns field errors. */
+  function validateBlock(id: PlatformId, f: PlatformForm, kws: string[]): Record<string, string> {
+    const e: Record<string, string> = {};
+    const fields = PLATFORM_FIELDS[id];
+    const label = platformLabelOf(id);
+    if (fields.title) {
+      if (f.title.trim().length < 3) e.title = "At least 3 characters";
+      if (f.title.trim().length > fields.titleMax) e.title = `At most ${fields.titleMax} characters (${label} limit)`;
+    }
+    if (fields.description) {
+      if (f.description.trim().length < 5) e.description = "At least 5 characters";
+      if (f.description.trim().length > fields.descMax) e.description = `At most ${fields.descMax} characters (${label} limit)`;
+    }
+    if (fields.category === "adobe" && !f.category) e.category = "Choose one of the 21 Adobe Stock categories";
+    if (fields.category === "shutterstock" && !f.ssPrimary) e.ssPrimary = "Choose a primary category";
+    if (fields.price && f.price.trim() && !(Number(f.price) > 0)) e.price = "Must be a positive USD amount";
+    if (kws.length < fields.keywords.min) {
+      e.keywords = `At least ${fields.keywords.min} keywords (${label} minimum)`;
+    }
+    if (kws.length > fields.keywords.max) {
+      e.keywords = `At most ${fields.keywords.max} keywords (${label} limit)`;
+    }
+    return e;
   }
 
   const fields = PLATFORM_FIELDS[platform];
@@ -189,40 +233,51 @@ export function ImageFormDialog({
     if (!form.prompt.trim()) e.prompt = "The generation prompt is required";
     if (!editing) {
       if (!/^https?:\/\/.+/.test(form.image_link.trim())) e.image_link = 'Must be an http(s) URL like "https://…/image.png"';
+      if (!form.ratio) e.ratio = "Required";
+      if (!form.quality) e.quality = "Required";
     }
-    if (!editing && !form.ratio) e.ratio = "Required";
-    if (!editing && !form.quality) e.quality = "Required";
 
-    // platform block validation (create = adobe; edit = active tab)
-    const activePlatform = editing ? platform : "adobe_stock";
-    const activeFields = PLATFORM_FIELDS[activePlatform];
-    if (activeFields.title && !editing) {
-      // create mode: adobe title
-      if (form.title.trim().length < 3) e.title = "At least 3 characters";
-      if (form.title.trim().length > activeFields.titleMax) e.title = `At most ${activeFields.titleMax} characters (platform limit)`;
-      if (!form.category) e.category = "Choose one of the 21 Adobe Stock categories";
-    }
-    if (editing) {
-      if (activeFields.title) {
-        if (form.title.trim().length < 3) e.title = "At least 3 characters";
-        if (form.title.trim().length > activeFields.titleMax) e.title = `At most ${activeFields.titleMax} characters (${platformLabelOf(activePlatform)} limit)`;
+    // active tab block
+    Object.assign(e, validateBlock(platform, form, keywords));
+
+    if (!editing) {
+      // Adobe block is the REQUIRED base — validate its draft even when the
+      // user sits on another tab (errors point back to the Adobe tab).
+      if (platform !== "adobe_stock") {
+        const adobeDraft = drafts.adobe_stock;
+        const adobeForm: PlatformForm = adobeDraft ?? EMPTY_PLATFORM;
+        const adobeErrors = validateBlock("adobe_stock", adobeForm, parseKeywords(adobeForm.keywords));
+        for (const [k, v] of Object.entries(adobeErrors)) {
+          e[`adobe-${k}`] = v;
+        }
       }
-      if (activeFields.description) {
-        if (form.description.trim().length < 5) e.description = "At least 5 characters";
-        if (form.description.trim().length > activeFields.descMax) e.description = `At most ${activeFields.descMax} characters (${platformLabelOf(activePlatform)} limit)`;
+      // every OTHER filled draft must be a complete, valid block
+      for (const id of PLATFORM_IDS) {
+        if (id === "adobe_stock" || id === platform) continue;
+        const d = drafts[id];
+        if (!draftFilled(d) || !d) continue;
+        const errs = validateBlock(id, d, parseKeywords(d.keywords));
+        if (Object.keys(errs).length > 0) {
+          e[`platform-${id}`] = `${platformLabelOf(id)} block incomplete — open its tab to fix it`;
+        }
       }
-      if (activeFields.category === "adobe" && !form.category) e.category = "Choose one of the 21 Adobe Stock categories";
-      if (activeFields.category === "shutterstock" && !form.ssPrimary) e.ssPrimary = "Choose a primary category";
-      if (activeFields.price && form.price.trim() && !(Number(form.price) > 0)) e.price = "Must be a positive USD amount";
     }
-    if (keywords.length < activeFields.keywords.min) {
-      e.keywords = `At least ${activeFields.keywords.min} keywords (${platformLabelOf(activePlatform)} minimum)`;
-    }
-    if (keywords.length > activeFields.keywords.max) {
-      e.keywords = `At most ${activeFields.keywords.max} keywords (${platformLabelOf(activePlatform)} limit)`;
-    }
+
     setErrors(e);
     return Object.keys(e).length === 0;
+  }
+
+  /** Build the API metadata block of one platform from its form values. */
+  function buildBlock(id: PlatformId, f: PlatformForm, kws: string[]): Record<string, unknown> {
+    const fields = PLATFORM_FIELDS[id];
+    const block: Record<string, unknown> = {};
+    if (fields.title) block.title = f.title.trim();
+    if (fields.description) block.description = f.description.trim();
+    if (fields.category === "adobe") block.category = f.category;
+    if (fields.category === "shutterstock") block.categories = [f.ssPrimary, f.ssSecondary].filter(Boolean);
+    if (fields.price && f.price.trim()) block.price = Number(f.price);
+    block.keywords = kws;
+    return block;
   }
 
   async function save() {
@@ -231,15 +286,7 @@ export function ImageFormDialog({
     try {
       if (editing && image) {
         // PATCH: common fields + the ACTIVE platform's metadata block
-        const block: Record<string, unknown> = {};
-        if (fields.title) block.title = form.title.trim();
-        if (fields.description) block.description = form.description.trim();
-        if (fields.category === "adobe") block.category = form.category;
-        if (fields.category === "shutterstock") {
-          block.categories = [form.ssPrimary, form.ssSecondary].filter(Boolean);
-        }
-        if (fields.price && form.price.trim()) block.price = Number(form.price);
-        block.keywords = keywords;
+        const block = buildBlock(platform, form, keywords);
 
         await api.images.update(image._id, {
           ...(form.session_id !== image.session_id ? { session_id: form.session_id } : {}),
@@ -251,20 +298,31 @@ export function ImageFormDialog({
         });
         toast({ title: "Image updated", description: `${platformLabelOf(platform)} metadata saved.` });
       } else {
-        // CREATE: flat Adobe fields — the API derives the other platforms
+        // CREATE: Adobe block (required base) + every other filled draft —
+        // the API derives the platforms left empty.
+        const adobeForm: PlatformForm = platform === "adobe_stock" ? form : drafts.adobe_stock ?? EMPTY_PLATFORM;
+        const adobeKeywords = parseKeywords(adobeForm.keywords);
+        const metadata: Record<string, unknown> = {
+          adobe_stock: buildBlock("adobe_stock", adobeForm, adobeKeywords),
+        };
+        for (const id of PLATFORM_IDS) {
+          if (id === "adobe_stock") continue;
+          const d = platform === id ? form : drafts[id];
+          if (draftFilled(d)) {
+            metadata[id] = buildBlock(id, d, parseKeywords(d.keywords));
+          }
+        }
         await api.images.create({
           session_id: form.session_id,
-          title: form.title.trim(),
-          category: form.category,
-          keywords,
           prompt: form.prompt.trim(),
           image_link: form.image_link.trim(),
           ratio: form.ratio,
           quality: form.quality,
+          metadata: metadata as StockImage["metadata"],
         });
         toast({
           title: "Image added",
-          description: "Adobe metadata stored — the other platforms were auto-derived from it.",
+          description: "Metadata stored — empty platform blocks were auto-derived from the Adobe one.",
         });
       }
       setDrafts({});
@@ -302,17 +360,18 @@ export function ImageFormDialog({
           <DialogDescription className="text-sm text-ink-muted">
             {editing
               ? "Pick a platform tab to edit its metadata, or fix the common fields. Other platforms are untouched."
-              : "Register a generated image with its Adobe Stock metadata — the other platforms are auto-derived (the agent writes the real values per platform)."}
+              : "Fill the Adobe Stock tab (required base) — open any other tab to store its REAL values; the platforms left empty are auto-derived from Adobe."}
           </DialogDescription>
         </DialogHeader>
 
-        {/* platform tabs (edit mode) */}
-        {editing && (
-          <div className="flex flex-wrap gap-1 border-b border-line bg-paper p-2" role="tablist" aria-label="Platform metadata">
-            {PLATFORMS.map((p) => {
-              const has = Boolean(image?.metadata?.[p.id]);
-              const used = image?.used?.[p.id] === true;
-              return (
+        {/* platform tabs (both modes — the same form when adding as when editing) */}
+        <div className="flex flex-wrap gap-1 border-b border-line bg-paper p-2" role="tablist" aria-label="Platform metadata">
+          {PLATFORMS.map((p) => {
+            const has = editing
+              ? Boolean(image?.metadata?.[p.id])
+              : p.id === "adobe_stock" || draftFilled(drafts[p.id]);
+            const used = image?.used?.[p.id] === true;
+            return (
                 <button
                   key={p.id}
                   type="button"
@@ -331,6 +390,21 @@ export function ImageFormDialog({
                 </button>
               );
             })}
+        </div>
+
+        {/* draft validation errors (create mode — shown under the tabs) */}
+        {!editing && (err("adobe-title") || err("adobe-category") || err("adobe-keywords")) && (
+          <p className="border-b border-danger/40 bg-danger-soft px-4 py-2 text-xs text-danger" role="alert">
+            Adobe Stock tab (the required base) is incomplete — open it to fix: {["adobe-title", "adobe-category", "adobe-keywords"].filter((k) => errors[k]).join(", ").replace(/adobe-/g, "")}.
+          </p>
+        )}
+        {!editing && Object.keys(errors).some((k) => k.startsWith("platform-")) && (
+          <div className="space-y-0.5 border-b border-danger/40 bg-danger-soft px-4 py-2 text-xs text-danger" role="alert">
+            {Object.entries(errors)
+              .filter(([k]) => k.startsWith("platform-"))
+              .map(([k, v]) => (
+                <p key={k}>{v}</p>
+              ))}
           </div>
         )}
 
@@ -339,7 +413,7 @@ export function ImageFormDialog({
           {fields.title && (
             <div className="sm:col-span-2">
               <Label htmlFor="img-title" className="eyebrow">
-                {platformLabelOf(editing ? platform : "adobe_stock")} — title
+                {platformLabelOf(platform)} — title
               </Label>
               <Input
                 id="img-title"

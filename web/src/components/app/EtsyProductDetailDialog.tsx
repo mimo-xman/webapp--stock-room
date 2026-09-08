@@ -48,7 +48,7 @@ import { StatusToggle } from "./StatusToggle";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { api } from "@/lib/api";
 import { formatBytes, formatDateTime } from "@/lib/format";
-import { etsyProductTypeLabel } from "@/lib/constants";
+import { etsyProductTypeLabel, etsyImageRoleLabel } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import type { EtsyProduct, EtsyProductImage, Upscale } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -103,13 +103,22 @@ export function EtsyProductDetailDialog({
   const safeIndex = images.length === 0 ? 0 : Math.min(index, images.length - 1);
   const image: EtsyProductImage | undefined = images[safeIndex];
 
-  // Switching image → back to the original variant, reset the broken flag,
-  // scroll the metadata column back to the top.
-  useEffect(() => {
+  // Switching image → back to the original variant + reset the broken flag
+  // (adjust-during-render pattern — setState directly in an effect is the
+  // lint error react-hooks/set-state-in-effect).
+  const navKey = product ? `${product._id}:${safeIndex}` : "";
+  const [prevNavKey, setPrevNavKey] = useState("");
+  if (prevNavKey !== navKey) {
+    setPrevNavKey(navKey);
     setVariant(VARIANT_ORIGINAL);
     setBroken(false);
+  }
+
+  // The metadata column scrolls back to the top on every image switch —
+  // a pure DOM side effect, no state involved.
+  useEffect(() => {
     metaScrollRef.current?.scrollTo({ top: 0 });
-  }, [safeIndex, product?._id]);
+  }, [navKey]);
 
   // ← / → switch images while the dialog is open. The listener is re-attached
   // on every render so the closures stay fresh after each image switch.
@@ -424,6 +433,16 @@ export function EtsyProductDetailDialog({
                 <span className="chip">
                   {images.length} image{images.length === 1 ? "" : "s"}
                 </span>
+                {images.filter((im) => im.role === "page").length > 0 && (
+                  <span className="chip" title="product pages — cover excluded">
+                    {images.filter((im) => im.role === "page").length} pages
+                  </span>
+                )}
+                {images.filter((im) => im.role === "marketing").length > 0 && (
+                  <span className="chip border-brand/50 text-brand" title="announcement images for the Etsy listing">
+                    {images.filter((im) => im.role === "marketing").length} promo
+                  </span>
+                )}
                 {price !== undefined && <span className="chip">${price.toFixed(2)}</span>}
                 {upscales.length > 0 && (
                   <span className="chip border-brand/60 text-brand" title={`${upscales.length} upscaled variant(s) on this image`}>
@@ -443,8 +462,13 @@ export function EtsyProductDetailDialog({
                     <h4 className="eyebrow">
                       Image {safeIndex + 1} / {images.length}
                       {image.role && (
-                        <span className="ml-1.5 font-mono text-[10px] normal-case tracking-normal text-ink-muted">
-                          · {image.role}
+                        <span
+                          className={cn(
+                            "ml-1.5 font-mono text-[10px] normal-case tracking-normal",
+                            image.role === "marketing" ? "font-bold text-brand" : "text-ink-muted",
+                          )}
+                        >
+                          · {etsyImageRoleLabel(image.role)}
                         </span>
                       )}
                     </h4>

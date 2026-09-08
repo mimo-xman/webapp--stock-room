@@ -13,6 +13,7 @@ const {
   ADOBE_CATEGORIES,
   SHUTTERSTOCK_CATEGORIES,
   ETSY_PRODUCT_TYPES,
+  ETSY_IMAGE_ROLES,
   ETSY_TITLE_MAX,
   ETSY_TAGS_MAX,
   ETSY_TAG_MAX_LEN,
@@ -303,9 +304,15 @@ const upscaleUpdateSchema = z
 
 // ── Etsy products ───────────────────────────────────────────────────────────
 
+const etsyImageRole = z.enum(ETSY_IMAGE_ROLES, {
+  errorMap: () => ({
+    message: `role must be one of: ${ETSY_IMAGE_ROLES.join(', ')} (marketing = the announcement/listing images)`,
+  }),
+});
+
 const etsyProductImageSchema = z.object({
   image_link: httpUrl,
-  role: z.enum(['cover', 'page', 'asset', 'preview']).optional().default('page'),
+  role: etsyImageRole.optional().default('page'),
   caption: z.string().trim().max(200).optional().default(''),
   prompt: z.string().trim().max(2000).optional().default(''),
   ratio: z.string().trim().max(12).optional().default(''),
@@ -364,7 +371,13 @@ const etsyProductUpdateSchema = z
   .object({
     session_id: objectId,
     product_type: z.enum(ETSY_PRODUCT_TYPES),
-    images: z.array(etsyProductImageSchema).min(1).max(200),
+    // NOTE: `images` is deliberately NOT patchable here — a wholesale array
+    // replacement would drop every nested _id / upscales / worker field
+    // (zod strips them, Mongoose regenerates new ones). Images are managed
+    // through the dedicated endpoints instead:
+    //   POST   /api/etsy-products/:id/images            (append)
+    //   PATCH  /api/etsy-products/:id/images/:imageId  (edit role/caption)
+    //   DELETE /api/etsy-products/:id/images/:imageId  (remove)
     metadata: etsyMetadataSchema.partial(),
     file_link: z.union([httpUrl, z.literal('')]),
     used_in_etsy: z.boolean(),
@@ -374,11 +387,12 @@ const etsyProductUpdateSchema = z
     message: 'provide at least one field to update',
   });
 
-// POST /api/etsy-products/:id/images — append ONE image (a finished page)
-// to an existing product (the agent builds its book page by page).
+// POST /api/etsy-products/:id/images — append ONE image (a finished page or
+// a marketing/announcement image) to an existing product (the agent builds
+// its book page by page).
 const etsyProductAddImageSchema = z.object({
   image_link: httpUrl,
-  role: z.enum(['cover', 'page', 'asset', 'preview']).optional().default('page'),
+  role: etsyImageRole.optional().default('page'),
   caption: z.string().trim().max(200).optional().default(''),
   prompt: z.string().trim().max(2000).optional().default(''),
   ratio: z.string().trim().max(12).optional().default(''),
@@ -390,8 +404,9 @@ const etsyProductAddImageSchema = z.object({
 // error message. (The claim/release/upscales bodies reuse the image schemas.)
 const etsyImageUpdateSchema = z
   .object({
-    role: z.enum(['cover', 'page', 'asset', 'preview']).optional(),
+    role: etsyImageRole.optional(),
     caption: z.string().trim().max(200).optional(),
+    image_link: httpUrl.optional(),
     active: z.boolean().optional(),
     error_message: z.string().trim().max(2000).optional(),
   })

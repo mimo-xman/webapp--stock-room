@@ -12,7 +12,7 @@ Each mission type has its own ready-to-send prompt in [`prompts/`](prompts/):
 |---|---|---|
 | [`prompts/main.md`](prompts/main.md) | **Any mission** — the universal prompt. Explains how to use the two APIs (Stock Room + Zazo Image Studio), the Images / Etsy products data structures and the per-platform metadata; embeds the GLOBAL CONTENT RULES; you fill in `[MISSION BRIEF]` with whatever you want produced (a brief asking for living beings is overridden by the rules). | `[MISSION BRIEF]` |
 | [`prompts/stock-platforms.md`](prompts/stock-platforms.md) | **Stock batch — ALL marketplaces** (Adobe Stock, Shutterstock, Wirestock, iStock/Getty, Pond5, Depositphotos, 123RF, Dreamstime) — live rules + AI-policy research per platform, **saturation check on the marketplaces themselves**, per-image **differentiation profiles** (never the default depiction — the similar-content rejection killer), hard rules (no living beings, no faces/body parts), **per-platform upload metadata stored on every image** (title/description/categories/keywords in each platform's own format and caps). | `[NUMBER OF PROMPTS TO CREATE]` |
-| [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Etsy coloring book** — children's line-art coloring pages + cover, Etsy rules researched live, print-ready. The agent researches current Etsy demand and **picks a NON-LIVING theme itself** (the owner's global content rules ban animals, people and characters; it picks vehicles, machines, buildings, toys, plants, patterns… and justifies with sources). Saves the book as ONE **Etsy product** (cover + pages + the full listing metadata: title ≤ 140, 13 tags, category, price). | `[NUMBER OF COLORING PAGES]` |
+| [`prompts/coloring-book-etsy.md`](prompts/coloring-book-etsy.md) | **Etsy coloring book** — children's line-art coloring pages + cover + **its ANNOUNCEMENT images** (the Etsy listing photos that sell the book — a dedicated HARD RULE covers their quality), Etsy rules researched live, print-ready. The agent researches current Etsy demand and **picks a NON-LIVING theme itself** (the owner's global content rules ban animals, people and characters; it picks vehicles, machines, buildings, toys, plants, patterns… and justifies with sources). Saves the book as ONE **Etsy product** (cover + pages + promo images with `role: "marketing"` + the full listing metadata: title ≤ 140, 13 tags, category, price). | `[NUMBER OF COLORING PAGES]` |
 
 All three share the same six connection variables (the two API links + keys + backup repo
 links) and the same file layout: a variables table, a ✂ **CUT HERE** line, and the prompt
@@ -83,7 +83,9 @@ prompts inherit the anti-similarity doctrine automatically.
   keywords), plus per-platform `used` flags. The API auto-derives the missing platforms
   from the Adobe block when a writer only provides it.
 - **`etsy_products`** — one digital product per record (coloring book, invitations,
-  wall-art set…): `images[]` (cover + pages, each with its own link, caption and generation
+  wall-art set…): `images[]` (cover + pages + the ANNOUNCEMENT images with
+  `role: "marketing"` — the listing photos that present the product to buyers; every
+  product type gets them, each image with its own link, caption, role and generation
   prompt) + ONE shared `metadata` block in Etsy's listing format (title ≤ 140 chars,
   description, up to 13 tags ≤ 20 chars each, category path, price, optional `file_link`
   for the assembled PDF/ZIP) + `used_in_etsy` flag.
