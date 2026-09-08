@@ -1,20 +1,37 @@
 # Upscale ONE image — manual workflow (Real-ESRGAN → Cloudinary → base).
 #
+# Works for BOTH targets:
+#   · image (default)      — a sellable image (images_to_bay)
+#   · etsy-product-image   — one image nested inside an Etsy product
+#     (requires product_id too — both ids are visible with copy buttons in
+#     the webapp's product detail popup)
+#
 # Behavior (see docs/UPSCALE.md):
 #   1. image must exist        → otherwise clear message + failed run;
 #   2. upscale count < max     → otherwise clean STOP with a clear message;
-#   3. download → upscale → upload → POST /api/images/:id/upscales.
+#   3. download → upscale → upload → POST …/upscales.
 #
-# Same secrets as the batch workflow (ASSET_API_URL, ASSET_API_KEY,
+# Same secrets as the batch workflows (ASSET_API_URL, ASSET_API_KEY,
 # CLOUDINARY_*, optional MAX_NUMBER_OF_UPSCALES_PER_IMAGE / DEFAULT_SCALE).
 name: Upscale — single image
 
 on:
   workflow_dispatch:
     inputs:
+      source:
+        description: "Cible — image : image à vendre (images_to_bay) ; etsy-product-image : image d'un produit Etsy (product_id requis)"
+        type: choice
+        options:
+          - image
+          - etsy-product-image
+        default: image
       image_id:
-        description: "MongoDB _id de l'image (24 hex — visible dans le détail d'une image dans la webapp)"
+        description: "MongoDB _id de l'image (24 hex — visible dans le détail de l'image dans la webapp)"
         required: true
+        default: ""
+      product_id:
+        description: "MongoDB _id du PRODUIT Etsy — requis uniquement pour etsy-product-image (visible dans le détail du produit)"
+        required: false
         default: ""
       max_upscales:
         description: "Stop si l'image a déjà ce nombre d'upscales (vide = secret MAX_NUMBER_OF_UPSCALES_PER_IMAGE, sinon 1)"
@@ -130,4 +147,10 @@ jobs:
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
           fi
-          python scripts/upscale/single.py --image-id "${{ inputs.image_id }}" $DRY_RUN_FLAG
+          SOURCE="images"
+          PRODUCT_ARG=""
+          if [ "${{ inputs.source }}" = "etsy-product-image" ]; then
+            SOURCE="etsy"
+            PRODUCT_ARG="--product-id ${{ inputs.product_id }}"
+          fi
+          python scripts/upscale/single.py --source "$SOURCE" --image-id "${{ inputs.image_id }}" $PRODUCT_ARG $DRY_RUN_FLAG

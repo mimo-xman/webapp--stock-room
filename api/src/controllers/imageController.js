@@ -529,14 +529,8 @@ async function release(req, res, next) {
 
 // ── download proxy ──────────────────────────────────────────────────────────
 
-const EXT_BY_TYPE = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/jpg': 'jpg',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-  'image/svg+xml': 'svg',
-};
+// Shared with the Etsy product-image endpoints (utils/proxyImage.js).
+const { streamRemoteImage, extFromType } = require('../utils/proxyImage');
 
 function slugify(title) {
   const s = String(title)
@@ -568,51 +562,12 @@ async function download(req, res, next) {
       throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
     }
 
-    let upstream;
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), CONFIG.DOWNLOAD_TIMEOUT_MS);
-      upstream = await fetch(image.image_link, {
-        signal: controller.signal,
-        redirect: 'follow',
-      });
-      clearTimeout(timer);
-    } catch (e) {
-      return res.status(502).json({
-        error: {
-          code: 'BAD_GATEWAY',
-          message: `Could not fetch the image at its source — ${e.name === 'AbortError' ? 'timeout' : e.message}`,
-        },
-      });
-    }
-
-    if (!upstream.ok || !upstream.body) {
-      return res.status(502).json({
-        error: {
-          code: 'BAD_GATEWAY',
-          message: `The image source answered HTTP ${upstream.status} — the stored link may have expired`,
-        },
-      });
-    }
-
-    const type = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-    const ext = EXT_BY_TYPE[type] || (image.image_link.split('.').pop() || 'png').toLowerCase().slice(0, 5);
-    const filename = `${slugify(displayTitle(image))}_${image._id}.${ext}`;
-
-    res.setHeader('Content-Type', type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Cache-Control', 'no-store');
-
-    const nodeStream = Readable.fromWeb(upstream.body);
-    nodeStream.on('error', (e) => {
-      console.error('[api] download stream error:', e.message);
-      if (!res.headersSent) {
-        res.status(502).json({ error: { code: 'BAD_GATEWAY', message: 'Image stream interrupted' } });
-      } else {
-        res.end();
-      }
+    const fallbackExt = (image.image_link.split('.').pop() || 'png').toLowerCase().slice(0, 5);
+    await streamRemoteImage(res, image.image_link, {
+      filenameBase: `${slugify(displayTitle(image))}_${image._id}`,
+      fallbackExt,
+      timeoutMs: CONFIG.DOWNLOAD_TIMEOUT_MS,
     });
-    nodeStream.pipe(res);
   } catch (err) {
     next(err);
   }
@@ -786,7 +741,7 @@ async function downloadUpscale(req, res, next) {
     }
 
     const type = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-    const ext = EXT_BY_TYPE[type] || (upscale.url.split('.').pop() || 'png').toLowerCase().slice(0, 5);
+    const ext = extFromType(type) || (upscale.url.split('.').pop() || 'png').toLowerCase().slice(0, 5);
     const filename = `${slugify(displayTitle(image))}_${image._id}_x${upscale.scale}.${ext}`;
 
     res.setHeader('Content-Type', type || 'application/octet-stream');

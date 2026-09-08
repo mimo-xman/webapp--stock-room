@@ -10,7 +10,8 @@
  *     session_id,
  *     product_type: 'coloring_book' | 'party_invitations' | …,
  *     images: [ { image_link, role: cover|page|asset|preview, caption,
- *                 ratio, quality, upscales: [] } ],
+ *                 ratio, quality, upscales: [],
+ *                 active, in_use, in_use_at, error_message } ],
  *     metadata: { title, description, tags: [], category, price, … },
  *     file_link,        // optional ready deliverable (PDF / ZIP)
  *     used_in_etsy,     // published on Etsy?
@@ -82,10 +83,37 @@ const productImageSchema = new mongoose.Schema(
           size_bytes: { type: Number, min: 0 },
           source: { type: String, enum: UPSCALE_SOURCES, default: 'github-actions' },
           run_id: { type: String, trim: true, maxlength: 64, default: '' },
+          used_in_adobe_stock: { type: Boolean, default: false },
           created_at: { type: Date, default: Date.now },
         },
       ],
       default: [],
+    },
+    // ── parallel batch-worker coordination (same semantics as ImageToBay) ──
+    // active: a paused image is EXCLUDED from every etsy claim — set to false
+    //   by a release 'error' (with error_message), toggled back on from the
+    //   webapp once fixed. Absent field = active (pre-feature documents).
+    // in_use / in_use_at: optimistic lock for the parallel upscale jobs — a
+    //   worker claims an image (findOneAndUpdate sets in_use: true + a
+    //   timestamp), releases it when done; a claim older than the stale
+    //   window (default 30 min) is considered dead and reclaimable.
+    active: {
+      type: Boolean,
+      default: true,
+    },
+    in_use: {
+      type: Boolean,
+      default: false,
+    },
+    in_use_at: {
+      type: Date,
+      default: null,
+    },
+    error_message: {
+      type: String,
+      trim: true,
+      maxlength: 2000,
+      default: '',
     },
   },
   { _id: true }

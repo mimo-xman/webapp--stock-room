@@ -414,9 +414,14 @@ Auth: header `X-API-Key: [STOCK ROOM API KEY]`.
 | `POST /api/etsy-products` | Create an Etsy product (images[] + one shared listing metadata block) — for bundled missions |
 | `POST /api/etsy-products/:id/images` | Append ONE image to an Etsy product |
 | `GET /api/etsy-products` | List Etsy products (`session_id`, `product_type`, `used_in_etsy`, …) |
+| `GET /api/etsy-products/:id` | One product (all its images + metadata) |
 
 Note: images can gain `upscales[]` entries (Real-ESRGAN ×2/×4, uploaded to Cloudinary)
-from the daily GitHub Actions job — you never create them. The per-platform `used`
+from the daily GitHub Actions job — you never create them. The same goes for the
+images nested in Etsy products (`etsy_products.images[].upscales[]`): the daily
+"Upscale — batch Etsy" job claims them one by one and registers their variants —
+you never write the worker fields (`active`, `in_use`, `in_use_at`,
+`error_message`) either; the webapp manages them. The per-platform `used`
 flags on the image (`used.adobe_stock`, `used.shutterstock`…) are the owner's
 "published there" signals, managed from the webapp.
 

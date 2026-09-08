@@ -2,16 +2,31 @@
  * EtsyProduct controller — CRUD + listing for Etsy digital products
  * (coloring books, invitations, wall-art sets…): one product = one or many
  * images + ONE shared set of Etsy listing metadata.
+ *
+ * The nested product images carry their OWN upscales / worker fields: the
+ * parallel Real-ESRGAN jobs claim them one by one through
+ * POST /api/etsy-products/claim and register the results on
+ * POST /api/etsy-products/:id/images/:imageId/upscales — the same protocol
+ * as the sellable images (images_to_bay), adapted to the nested structure.
  */
 const EtsyProduct = require('../models/EtsyProduct');
 const Session = require('../models/Session');
-const { ETSY_PRODUCT_SORT_FIELDS, ETSY_PRODUCT_TYPES } = require('../constants');
+const { CONFIG } = require('../config');
+const {
+  ETSY_PRODUCT_SORT_FIELDS,
+  ETSY_PRODUCT_TYPES,
+  MONGODB_OBJECT_ID_RE,
+  UPSCALE_HARD_MAX,
+  CLAIM_STALE_DEFAULT_MINUTES,
+} = require('../constants');
 const {
   escapeRegex,
   parseCommonQuery,
   exactFilter,
   paginationMeta,
 } = require('../utils/listQuery');
+const { streamRemoteImage } = require('../utils/proxyImage');
+const { destroyAsset } = require('../utils/cloudinary');
 const { HttpError } = require('../middleware/errorHandler');
 
 function badRequest(res, problems) {
@@ -35,6 +50,54 @@ function toPlain(doc) {
       _id: im._id ? String(im._id) : undefined,
     })),
   };
+}
+
+/** 404 on malformed ids (instead of a CastError 500). */
+function assertIds(...ids) {
+  for (const id of ids) {
+    if (!MONGODB_OBJECT_ID_RE.test(String(id))) {
+      throw new HttpError(404, 'NOT_FOUND', `Unknown id "${id}" — not a valid MongoDB ObjectId`);
+    }
+  }
+}
+
+function productTitle(product) {
+  return (product.metadata && product.metadata.title) || 'Untitled product';
+}
+
+function imageLabel(image, index) {
+  const caption = (image.caption || '').trim();
+  return caption || `image #${index + 1}`;
+}
+
+function slugify(s) {
+  return String(s)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'image';
+}
+
+/** Load a product + one of its images (404s with clear codes otherwise). */
+async function loadProductImage(productId, imageId) {
+  assertIds(productId, imageId);
+  const product = await EtsyProduct.findById(productId);
+  if (!product) {
+    throw new HttpError(404, 'NOT_FOUND', `Etsy product ${productId} does not exist`);
+  }
+  const index = product.images.findIndex(
+    (im) => im._id && String(im._id) === String(imageId)
+  );
+  if (index < 0) {
+    throw new HttpError(
+      404,
+      'IMAGE_NOT_FOUND',
+      `Image ${imageId} does not exist on product ${productId} — it may have been removed already`
+    );
+  }
+  return { product, image: product.images[index], index };
 }
 
 /** Parse product-specific filters (session_id, product_type, used_in_etsy). */
@@ -226,6 +289,382 @@ async function addImage(req, res, next) {
   }
 }
 
+// ── parallel batch workers: claim / release (per nested image) ──────────────
+
+/** How many candidate products each claim attempt inspects before giving up
+ *  (a race with another worker simply retries with the next candidate). */
+const CLAIM_CANDIDATES = 3;
+const CLAIM_ATTEMPTS = 5;
+
+/** True when the product image is eligible for a claim: upscales below the
+ *  policy max, active (absent field = active), and free (or its claim is
+ *  older than the stale window — a worker that died without releasing). */
+function eligibleImage(im, effectiveMax, staleBefore) {
+  const upscales = Array.isArray(im.upscales) ? im.upscales.length : 0;
+  const activeOk = im.active !== false;
+  const free = im.in_use !== true || (im.in_use_at && im.in_use_at < staleBefore);
+  return upscales < effectiveMax && activeOk && free;
+}
+
+/** $expr helper: products holding at least one eligible image. */
+function hasEligibleImageExpr(effectiveMax, staleBefore) {
+  return {
+    $expr: {
+      $gt: [
+        {
+          $size: {
+            $filter: {
+              input: { $ifNull: ['$images', []] },
+              as: 'im',
+              cond: {
+                $and: [
+                  { $lt: [{ $size: { $ifNull: ['$$im.upscales', []] } }, effectiveMax] },
+                  { $ne: ['$$im.active', false] },
+                  {
+                    $or: [
+                      { $ne: ['$$im.in_use', true] },
+                      { $lt: [{ $ifNull: ['$$im.in_use_at', new Date(0)] }, staleBefore] },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        },
+        0,
+      ],
+    },
+  };
+}
+
+/**
+ * POST /api/etsy-products/claim
+ *
+ * A parallel batch worker atomically reserves ONE eligible product image
+ * (upscales < max_upscales, active, free — or claimed longer than
+ * stale_minutes ago). Two steps on purpose:
+ *   1. an aggregation picks the oldest products holding an eligible image;
+ *   2. a findOneAndUpdate (the single source of truth) flips in_use on the
+ *      chosen sub-document — if another worker won the race, we simply retry
+ *      with the next candidate.
+ *
+ * Body: { max_upscales?, stale_minutes? } — both optional.
+ * Response: 200 {
+ *   data: {
+ *     product_id, image_id, image_index,
+ *     product: <plain product>,   // full doc, images included
+ *     image:   <plain image>,    // the claimed sub-document (in_use: true)
+ *   } | null,
+ *   claimed: boolean, max_upscales: n,
+ * }
+ */
+async function claim(req, res, next) {
+  try {
+    const { max_upscales, stale_minutes } = req.validated;
+    const effectiveMax = Math.min(
+      max_upscales ?? CONFIG.MAX_UPSCALES_PER_IMAGE,
+      UPSCALE_HARD_MAX
+    );
+    const staleMinutes = stale_minutes ?? CLAIM_STALE_DEFAULT_MINUTES;
+    const staleBefore = new Date(Date.now() - staleMinutes * 60_000);
+
+    for (let attempt = 1; attempt <= CLAIM_ATTEMPTS; attempt += 1) {
+      const candidates = await EtsyProduct.aggregate([
+        { $match: hasEligibleImageExpr(effectiveMax, staleBefore) },
+        { $sort: { createdAt: 1, _id: 1 } },
+        { $limit: CLAIM_CANDIDATES },
+        {
+          $project: {
+            images: {
+              $map: {
+                input: '$images',
+                as: 'im',
+                in: {
+                  _id: '$$im._id',
+                  upscales: { $size: { $ifNull: ['$$im.upscales', []] } },
+                  active: '$$im.active',
+                  in_use: '$$im.in_use',
+                  in_use_at: '$$im.in_use_at',
+                },
+              },
+            },
+          },
+        },
+      ]);
+
+      if (candidates.length === 0) {
+        return res.json({ data: null, claimed: false, max_upscales: effectiveMax });
+      }
+
+      for (const candidate of candidates) {
+        const image = (candidate.images || []).find(
+          (im) => im._id && eligibleImage(im, effectiveMax, staleBefore)
+        );
+        if (!image) continue; // stale candidate view — try the next product
+
+        // The atomic reservation itself: the findOneAndUpdate re-checks that
+        // the chosen image is still free, so two workers can never reserve it.
+        const doc = await EtsyProduct.findOneAndUpdate(
+          {
+            _id: candidate._id,
+            images: {
+              $elemMatch: {
+                _id: image._id,
+                $or: [
+                  { in_use: { $ne: true } },
+                  { in_use_at: { $lt: staleBefore } },
+                ],
+              },
+            },
+          },
+          { $set: { 'images.$[img].in_use': true, 'images.$[img].in_use_at': new Date() } },
+          { arrayFilters: [{ 'img._id': image._id }], new: true }
+        );
+        if (!doc) continue; // lost the race — next candidate
+
+        const plain = toPlain(doc);
+        const index = plain.images.findIndex((im) => im._id === String(image._id));
+        return res.json({
+          data: {
+            product_id: plain._id,
+            image_id: plain.images[index]._id,
+            image_index: index,
+            product: plain,
+            image: plain.images[index],
+          },
+          claimed: true,
+          max_upscales: effectiveMax,
+        });
+      }
+    }
+
+    // Every candidate lost its race on every attempt — behave like "nothing
+    // claimable" for this call; the worker will call again on its next loop.
+    return res.json({ data: null, claimed: false, max_upscales: effectiveMax });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/etsy-products/:id/images/:imageId/release
+ *
+ * The worker that claimed a product image reports the terminal state:
+ *   ok      → in_use cleared, error_message cleared
+ *   stopped → in_use cleared only (cancelled / limit raced)
+ *   error   → in_use cleared + active:false + error_message recorded
+ * Idempotent by design (releasing a free image is a no-op), which lets the
+ * single-image job report failures without claiming first.
+ */
+async function releaseImage(req, res, next) {
+  try {
+    assertIds(req.params.id, req.params.imageId);
+    const { status, error_message } = req.validated;
+
+    const patch = {
+      'images.$[img].in_use': false,
+      'images.$[img].in_use_at': null,
+    };
+    if (status === 'ok') patch['images.$[img].error_message'] = '';
+    if (status === 'error') {
+      patch['images.$[img].active'] = false;
+      patch['images.$[img].error_message'] = error_message || 'Unknown upscale failure';
+    }
+
+    const product = await EtsyProduct.findOneAndUpdate(
+      { _id: req.params.id, 'images._id': req.params.imageId },
+      { $set: patch },
+      { arrayFilters: [{ 'img._id': req.params.imageId }], new: true }
+    );
+    if (!product) {
+      throw new HttpError(404, 'NOT_FOUND', `Etsy product ${req.params.id} (or its image ${req.params.imageId}) does not exist`);
+    }
+    res.json({ data: toPlain(product) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── per-image webapp edits (pause / reactivate / dismiss error) ─────────────
+
+/**
+ * PATCH /api/etsy-products/:id/images/:imageId
+ * Edit one product image from the webapp: caption / role, and the worker
+ * fields — active (pause & reactivate) and error_message (dismiss).
+ */
+async function updateImage(req, res, next) {
+  try {
+    const { product, image } = await loadProductImage(req.params.id, req.params.imageId);
+    Object.assign(image, req.validated);
+    await product.save();
+    res.json({ data: toPlain(product) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── download proxy (same contract as /api/images/:id/download) ─────────────
+
+/**
+ * GET /api/etsy-products/:id/images/:imageId/download
+ * Server-side proxy download of ONE product image (avoids CORS, dead-link
+ * and ephemeral-source issues; 502 when the origin is unreachable — the
+ * Python worker retries those while the origin service wakes up).
+ */
+async function downloadImage(req, res, next) {
+  try {
+    const { product, image, index } = await loadProductImage(req.params.id, req.params.imageId);
+    const fallbackExt = (image.image_link.split('.').pop() || 'png').toLowerCase().slice(0, 5);
+    await streamRemoteImage(res, image.image_link, {
+      filenameBase: `${slugify(productTitle(product))}-${slugify(imageLabel(image, index))}`,
+      fallbackExt,
+      timeoutMs: CONFIG.DOWNLOAD_TIMEOUT_MS,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── upscales on the nested images (Real-ESRGAN derivatives) ───────────────
+
+/**
+ * POST /api/etsy-products/:id/images/:imageId/upscales
+ * Register one upscaled variant on a product image (called by the upscale
+ * job). Refused with 409 UPSCALE_LIMIT_REACHED once the image already holds
+ * max_upscales entries.
+ */
+async function addUpscale(req, res, next) {
+  try {
+    const { max_upscales, ...entry } = req.validated;
+    const { product, image, index } = await loadProductImage(req.params.id, req.params.imageId);
+
+    const effectiveMax = Math.min(
+      max_upscales ?? CONFIG.MAX_UPSCALES_PER_IMAGE,
+      UPSCALE_HARD_MAX
+    );
+    const current = image.upscales ? image.upscales.length : 0;
+    if (current >= effectiveMax) {
+      throw new HttpError(
+        409,
+        'UPSCALE_LIMIT_REACHED',
+        `Image "${imageLabel(image, index)}" of "${productTitle(product)}" already has ${current} upscale${current === 1 ? '' : 's'} — ` +
+          `the limit for this operation is ${effectiveMax}. ` +
+          'Delete an existing upscale first, or raise the limit (secret MAX_NUMBER_OF_UPSCALES_PER_IMAGE / input max_upscales).'
+      );
+    }
+
+    image.upscales.push(entry);
+    await product.save();
+    res.status(201).json({ data: toPlain(product) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /api/etsy-products/:id/images/:imageId/upscales/:upscaleId
+ * Update one upscale entry (webapp "Mark used" stamp).
+ */
+async function updateUpscale(req, res, next) {
+  try {
+    assertIds(req.params.id, req.params.imageId, req.params.upscaleId);
+    const { product, image } = await loadProductImage(req.params.id, req.params.imageId);
+
+    const upscale = image.upscales && image.upscales.id(req.params.upscaleId);
+    if (!upscale) {
+      throw new HttpError(
+        404,
+        'UPSCALE_NOT_FOUND',
+        `Upscale ${req.params.upscaleId} does not exist on image ${req.params.imageId} — it may have been deleted already`
+      );
+    }
+
+    Object.assign(upscale, req.validated);
+    await product.save();
+    res.json({ data: toPlain(product) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /api/etsy-products/:id/images/:imageId/upscales/:upscaleId
+ * Remove one upscale entry. When Cloudinary is configured on the API and the
+ * entry carries a public_id, the remote asset is destroyed too (best-effort).
+ */
+async function removeUpscale(req, res, next) {
+  try {
+    assertIds(req.params.id, req.params.imageId, req.params.upscaleId);
+    const { product, image } = await loadProductImage(req.params.id, req.params.imageId);
+
+    const upscale = image.upscales && image.upscales.id(req.params.upscaleId);
+    if (!upscale) {
+      throw new HttpError(
+        404,
+        'UPSCALE_NOT_FOUND',
+        `Upscale ${req.params.upscaleId} does not exist on image ${req.params.imageId} — it may have been deleted already`
+      );
+    }
+
+    const publicId = upscale.public_id;
+    upscale.deleteOne();
+    await product.save();
+
+    let cloudinary = null;
+    if (publicId) {
+      const result = await destroyAsset(publicId);
+      cloudinary = {
+        destroyed: result.destroyed,
+        note: result.error || result.result || 'ok',
+      };
+      if (!result.destroyed) {
+        console.warn(
+          `[api] etsy upscale ${req.params.upscaleId}: DB entry removed, remote asset kept — ${cloudinary.note}`
+        );
+      }
+    }
+
+    res.json({
+      data: {
+        deleted: true,
+        upscalesRemaining: image.upscales ? image.upscales.length : 0,
+        cloudinary,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/etsy-products/:id/images/:imageId/upscales/:upscaleId/download
+ * Download proxy for one upscaled variant of a product image.
+ */
+async function downloadUpscale(req, res, next) {
+  try {
+    assertIds(req.params.id, req.params.imageId, req.params.upscaleId);
+    const { product, image, index } = await loadProductImage(req.params.id, req.params.imageId);
+
+    const upscale = image.upscales && image.upscales.id(req.params.upscaleId);
+    if (!upscale) {
+      throw new HttpError(
+        404,
+        'UPSCALE_NOT_FOUND',
+        `Upscale ${req.params.upscaleId} does not exist on image ${req.params.imageId} — it may have been deleted already`
+      );
+    }
+
+    const fallbackExt = (upscale.url.split('.').pop() || 'png').toLowerCase().slice(0, 5);
+    await streamRemoteImage(res, upscale.url, {
+      filenameBase: `${slugify(productTitle(product))}-${slugify(imageLabel(image, index))}_x${upscale.scale}`,
+      fallbackExt,
+      timeoutMs: CONFIG.DOWNLOAD_TIMEOUT_MS,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   list,
   create,
@@ -233,4 +672,12 @@ module.exports = {
   update,
   remove,
   addImage,
+  claim,
+  releaseImage,
+  updateImage,
+  downloadImage,
+  addUpscale,
+  updateUpscale,
+  removeUpscale,
+  downloadUpscale,
 };

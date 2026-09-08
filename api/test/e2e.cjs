@@ -600,6 +600,211 @@ async function main() {
     r = await call('POST', '/api/images/000000000000000000000000/release', { key: API_KEY, body: { status: 'ok' } });
     ok('release unknown image → 404', r.status === 404);
 
+    // ── Etsy products: per-image claim / release / upscales ─────────────────
+    console.log('─ etsy products: per-image claim / release / upscales');
+    const EtsyProduct = require('../src/models/EtsyProduct');
+
+    r = await call('POST', '/api/sessions', { key: API_KEY, body: { title: 'Etsy upscale probe session' } });
+    const s4 = r.json.data._id;
+
+    const mkEtsyProduct = (title, images) => ({
+      session_id: s4,
+      product_type: 'coloring_book',
+      images,
+      metadata: {
+        title,
+        description: 'A printable coloring book with distinct, charming pages for relaxed afternoons.',
+        tags: ['coloring book', 'printable', 'kids activity'],
+        category: 'Toys & Games > Games > Coloring Books',
+        price: 4.99,
+      },
+    });
+
+    r = await call('POST', '/api/etsy-products', {
+      key: API_KEY,
+      body: mkEtsyProduct('Woodland Coloring Book', [
+        { image_link: `http://127.0.0.1:${fakeImgPort}/img.png`, role: 'cover', caption: 'Cover' },
+        { image_link: 'https://cdn.example.com/page-1.png', role: 'page', caption: 'Page 1 — toadstools' },
+        { image_link: 'https://cdn.example.com/page-2.png', role: 'page', caption: 'Page 2 — lanterns' },
+      ]),
+    });
+    ok('create etsy product with 3 images → 201', r.status === 201 && r.json.data.images.length === 3, r.json);
+    const ep1 = r.json.data._id;
+    const ep1Images = r.json.data.images.map((im) => im._id);
+
+    r = await call('POST', '/api/etsy-products', {
+      key: API_KEY,
+      body: mkEtsyProduct('Harbor Coloring Book', [
+        { image_link: 'https://cdn.example.com/harbor-cover.png', role: 'cover', caption: 'Cover' },
+        { image_link: 'https://cdn.example.com/harbor-1.png', role: 'page', caption: 'Page 1 — boats' },
+      ]),
+    });
+    ok('create second etsy product → 201', r.status === 201);
+    const ep2 = r.json.data._id;
+
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 'banana' } });
+    ok('etsy claim with string max_upscales → 400', r.status === 400 && r.json.error.code === 'VALIDATION_ERROR');
+
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    ok('etsy claim → oldest product first + claimed:true + shape {product_id, image_id, image_index, product, image}',
+      r.status === 200 && r.json.claimed === true && r.json.data.product_id === ep1 &&
+      typeof r.json.data.image_id === 'string' && r.json.data.image_index >= 0 &&
+      r.json.data.image && r.json.data.product && r.json.data.image.in_use === true,
+      r.json.data && { product_id: r.json.data.product_id, image_index: r.json.data.image_index });
+    const ec1 = r.json.data.image_id;
+
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    ok('second etsy claim → a DIFFERENT image (atomic reservation)',
+      r.json.claimed === true && r.json.data.image_id !== ec1, { ec1, got: r.json.data && r.json.data.image_id });
+    const ec2 = r.json.data.image_id;
+
+    r = await call('GET', `/api/etsy-products/${ep1}`, K);
+    const claimedImage = r.json.data.images.find((im) => im._id === ec1);
+    ok('claim persisted (GET shows the image in_use:true)', claimedImage.in_use === true);
+
+    r = await call('POST', `/api/etsy-products/${ep1}/images/${ec1}/release`, { key: API_KEY, body: { status: 'stopped' } });
+    ok('etsy release stopped → in_use:false, active untouched, no error',
+      r.status === 200 && r.json.data.images.find((im) => im._id === ec1).in_use === false &&
+      r.json.data.images.find((im) => im._id === ec1).active !== false);
+
+    r = await call('POST', `/api/etsy-products/${ep1}/images/${ec2}/release`, { key: API_KEY, body: { status: 'error' } });
+    ok('etsy release error without error_message → 400', r.status === 400);
+
+    r = await call('POST', `/api/etsy-products/${ep1}/images/${ec2}/release`, {
+      key: API_KEY,
+      body: { status: 'error', error_message: 'Real-ESRGAN crashed while upscaling this page' },
+    });
+    const releasedImg = r.json.data.images.find((im) => im._id === ec2);
+    ok('etsy release error → in_use:false + active:false + error_message recorded',
+      r.status === 200 && releasedImg.in_use === false && releasedImg.active === false &&
+      /Real-ESRGAN crashed/.test(releasedImg.error_message), releasedImg);
+
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    ok('etsy claim skips the paused image', r.json.claimed === true && r.json.data.image_id !== ec2);
+    const ec3 = r.json.data.image_id;
+
+    // webapp flows: re-activate + dismiss the error message on ONE image
+    r = await call('PATCH', `/api/etsy-products/${ep1}/images/${ec2}`, { password: APP_PASSWORD, body: { active: 'yes' } });
+    ok('PATCH etsy image with non-boolean active → 400', r.status === 400);
+    r = await call('PATCH', `/api/etsy-products/${ep1}/images/${ec2}`, { password: APP_PASSWORD, body: { active: true } });
+    ok('PATCH re-activate paused etsy image → 200 + active:true',
+      r.status === 200 && r.json.data.images.find((im) => im._id === ec2).active === true);
+    r = await call('PATCH', `/api/etsy-products/${ep1}/images/${ec2}`, { password: APP_PASSWORD, body: { error_message: '' } });
+    ok('PATCH dismiss etsy image error_message → 200 + cleared',
+      r.status === 200 && r.json.data.images.find((im) => im._id === ec2).error_message === '');
+    r = await call('PATCH', `/api/etsy-products/${ep1}/images/${ec2}`, { password: APP_PASSWORD, body: {} });
+    ok('PATCH etsy image with empty body → 400', r.status === 400);
+
+    // upscales on the nested images
+    r = await call('POST', `/api/etsy-products/${ep1}/images/${ec3}/upscales`, {
+      key: API_KEY,
+      body: { url: 'https://res.cloudinary.com/demo/woodland_x4.png', scale: 4, model: 'RealESRGAN_x4plus', width: 4096, height: 4096, size_bytes: 3145728, run_id: '42' },
+    });
+    ok('etsy addUpscale → 201 + entry on the image',
+      r.status === 201 && r.json.data.images.find((im) => im._id === ec3).upscales.length === 1, r.json);
+    const eUpscaleId = r.json.data.images.find((im) => im._id === ec3).upscales[0]._id;
+
+    r = await call('POST', `/api/etsy-products/${ep1}/images/${ec3}/upscales`, {
+      key: API_KEY,
+      body: { url: 'https://res.cloudinary.com/demo/woodland_x4_2.png', scale: 4, model: 'RealESRGAN_x4plus', max_upscales: 1 },
+    });
+    ok('etsy addUpscale past max_upscales → 409 UPSCALE_LIMIT_REACHED',
+      r.status === 409 && r.json.error.code === 'UPSCALE_LIMIT_REACHED');
+
+    r = await call('PATCH', `/api/etsy-products/${ep1}/images/${ec3}/upscales/${eUpscaleId}`, {
+      password: APP_PASSWORD, body: { used_in_adobe_stock: true },
+    });
+    ok('etsy updateUpscale mark used → 200',
+      r.status === 200 && r.json.data.images.find((im) => im._id === ec3).upscales[0].used_in_adobe_stock === true,
+      { status: r.status, body: JSON.stringify(r.json).slice(0, 200) });
+
+    // download proxies (the cover points at the fake local image server)
+    r = await call('GET', `/api/etsy-products/${ep1}/images/${ep1Images[0]}/download`, K);
+    ok('etsy image download proxy → 200 + image/png + attachment filename',
+      r.status === 200 && (r.headers.get('content-type') || '').includes('image/png') &&
+      /attachment; filename=/.test(r.headers.get('content-disposition') || ''), r.headers.get('content-disposition'));
+
+    r = await call('GET', `/api/etsy-products/${ep1}/images/${ec3}/upscales/${eUpscaleId}/download`, K);
+    ok('etsy upscale download proxy → 200 (cloudinary url is faked → 502 expected)',
+      r.status === 502 && r.json.error.code === 'BAD_GATEWAY', { status: r.status });
+
+    r = await call('DELETE', `/api/etsy-products/${ep1}/images/${ec3}/upscales/${eUpscaleId}`, { password: APP_PASSWORD });
+    ok('etsy removeUpscale → 200 + deleted + upscalesRemaining:0',
+      r.status === 200 && r.json.data.deleted === true && r.json.data.upscalesRemaining === 0, r.json);
+
+    // 404s & malformed ids
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    await call('POST', `/api/etsy-products/${r.json.data.product_id}/images/${r.json.data.image_id}/release`, { key: API_KEY, body: { status: 'stopped' } });
+    r = await call('POST', `/api/etsy-products/000000000000000000000000/images/${ec1}/release`, { key: API_KEY, body: { status: 'ok' } });
+    ok('etsy release unknown product → 404', r.status === 404);
+    r = await call('PATCH', `/api/etsy-products/${ep1}/images/000000000000000000000000`, { password: APP_PASSWORD, body: { active: true } });
+    ok('PATCH unknown etsy image → 404 IMAGE_NOT_FOUND', r.status === 404 && r.json.error.code === 'IMAGE_NOT_FOUND');
+    r = await call('POST', `/api/etsy-products/${ep1}/images/not-an-objectid/upscales`, {
+      key: API_KEY, body: { url: 'https://x/y.png', scale: 4, model: 'RealESRGAN_x4plus' },
+    });
+    ok('etsy addUpscale malformed image id → 404 (not a 500)', r.status === 404);
+
+    // stale reclaim on a product image
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    const es1 = { pid: r.json.data.product_id, iid: r.json.data.image_id };
+    await EtsyProduct.updateOne(
+      { _id: es1.pid, 'images._id': es1.iid },
+      { $set: { 'images.$.in_use_at': new Date(Date.now() - 40 * 60000) } }
+    );
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5, stale_minutes: 30 } });
+    ok('stale etsy claim (in_use_at 40 min old) is reclaimed',
+      r.json.claimed === true && r.json.data.image_id === es1.iid, { expected: es1.iid, got: r.json.data && r.json.data.image_id });
+    await call('POST', `/api/etsy-products/${es1.pid}/images/${es1.iid}/release`, { key: API_KEY, body: { status: 'stopped' } });
+
+    // a FRESH etsy claim must NOT be stolen
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    const es2 = { pid: r.json.data.product_id, iid: r.json.data.image_id };
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5, stale_minutes: 30 } });
+    ok('fresh etsy claim is NOT stolen (another image returned)',
+      r.json.claimed === true && r.json.data.image_id !== es2.iid);
+    await call('POST', `/api/etsy-products/${es2.pid}/images/${es2.iid}/release`, { key: API_KEY, body: { status: 'stopped' } });
+    await call('POST', `/api/etsy-products/${r.json.data.product_id}/images/${r.json.data.image_id}/release`, { key: API_KEY, body: { status: 'stopped' } });
+
+    // the ec3 probe image is still claimed (used for the upscale tests) —
+    // release it so the exhaustion loop sees the full eligible pool.
+    await call('POST', `/api/etsy-products/${ep1}/images/${ec3}/release`, { key: API_KEY, body: { status: 'stopped' } });
+
+    // exhaustion: claim every eligible etsy image (NO release — the claim
+    // itself removes them from the eligible pool), then data:null.
+    // Pool at this point: ep1's 3 images + ep2's 2 = 5.
+    const etsyClaimed = [];
+    for (;;) {
+      const res = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5 } });
+      if (!res.json.claimed) {
+        ok('etsy claim → data:null + claimed:false once exhausted', res.json.data === null && res.json.claimed === false);
+        break;
+      }
+      etsyClaimed.push(`${res.json.data.product_id}:${res.json.data.image_id}`);
+    }
+    ok(`etsy exhaustion loop: ${etsyClaimed.length} image claims, all distinct (no double reservation)`,
+      new Set(etsyClaimed).size === etsyClaimed.length && etsyClaimed.length === 5,
+      { count: etsyClaimed.length });
+
+    // pre-feature product: image sub-documents WITHOUT worker fields → still
+    // claimable (absent in_use/active = eligible). Everything is claimed now,
+    // so unsetting ep2's fields frees exactly its two images.
+    await EtsyProduct.updateOne(
+      { _id: ep2 },
+      { $unset: { 'images.$[].active': '', 'images.$[].in_use': '', 'images.$[].error_message': '' } }
+    );
+    const rawEp2 = await EtsyProduct.findById(ep2).lean();
+    ok('pre-feature etsy images have no worker fields in the DB (migration shape)',
+      rawEp2.images.every((im) => im.active === undefined && im.in_use === undefined && im.error_message === undefined));
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    ok('pre-feature etsy image (no active/in_use fields) is claimable',
+      r.json.claimed === true && r.json.data.product_id === ep2,
+      { ep2, got: r.json.data && r.json.data.product_id });
+    await call('POST', `/api/etsy-products/${r.json.data.product_id}/images/${r.json.data.image_id}/release`, { key: API_KEY, body: { status: 'stopped' } });
+    // and the second pre-feature image too — the absent-fields semantics hold
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 5 } });
+    ok('second pre-feature etsy image is claimable too',
+      r.json.claimed === true && r.json.data.product_id === ep2);
+
     // exhaustion: claim everything, then data:null — the batch worker's exit condition
     const claimedIds = [];
     for (;;) {

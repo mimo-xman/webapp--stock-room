@@ -1,46 +1,41 @@
-# Upscale batch — Real-ESRGAN, daily at 08:00 Morocco + manual runs.
+# Upscale batch — ETSY EDITION, daily at 10:00 Morocco + manual runs.
 #
-# SELLABLE IMAGES edition (collection images_to_bay). The Etsy product
-# images have their own companion workflow — upscale-etsy-batch.yml (10:00
-# Maroc, same machine, dedicated routes) — the two businesses are separate.
+# Same parallel-worker machine as upscale-batch.yml, but for the images
+# nested inside Etsy products (etsy_products.images[] — each image has its
+# OWN upscales array). The two businesses were split apart, so each keeps
+# its own workflow:
 #
-# PARALLEL EDITION: a `warmup` job wakes the Render API (free tier spins
-# services down — 502 otherwise) and computes the worker list, then N
-# identical `upscale` jobs run AT THE SAME TIME (matrix). Each worker loops:
+#   upscale-batch.yml      → sellable images (images_to_bay)     — 08:00 Maroc
+#   upscale-etsy-batch.yml → THIS ONE, Etsy product images       — 10:00 Maroc
 #
-#     claim one eligible image (atomic POST /api/images/claim — upscales
-#     count < max, active, not already claimed by another worker)
-#       → Real-ESRGAN → Cloudinary → POST /api/images/:id/upscales
+# The 2-hour offset is deliberate: the two batches never run at the same
+# moment, so the Render API (free tier) never wakes under a 20-worker stampede.
+#
+# The schedule fires at 09:00 UTC = 10:00 Morocco (UTC+1). During Ramadan
+# Morocco runs UTC+0, so the job fires at 09:00 local then.
+#
+# Worker loop (identical protocol, dedicated nested routes):
+#
+#     claim one eligible product image (atomic POST /api/etsy-products/claim —
+#     upscales count < max, active, not already claimed by another worker)
+#       → Real-ESRGAN → Cloudinary (folder etsy-products/upscales by default)
+#       → POST /api/etsy-products/:id/images/:imageId/upscales
 #       → release 'ok'
 #     claim the next… until the API answers "nothing left to claim".
 #
-# The claim is a single atomic findOneAndUpdate, so two workers can never
-# process the same image. A hard failure marks the image active:false +
-# error_message (visible in the webapp, re-activable by hand). A claim older
-# than 30 minutes is considered dead and reclaimable — a cancelled/killed
-# worker cannot lock an image forever.
-#
-# Per-image speed: the tiles of each Real-ESRGAN upscale are ALSO run in
-# parallel processes (UPSCALE_TILE_WORKERS, default auto = one per CPU core,
-# max 4) — bit-identical output, ~1.3-2× faster on the 4-vCPU runners.
-#
-# Public repository = unlimited Actions minutes, so 10 simultaneous jobs are
-# free. Total throughput ≈ max_images PER WORKER × workers images per run.
-#
-# Required repo secrets (see docs/UPSCALE.md):
+# Required repo secrets (shared with the other upscale workflows —
+# see docs/UPSCALE.md):
 #   ASSET_API_URL                          — API Render base URL
 #   ASSET_API_KEY                          — agent key (same as API_KEY on Render)
 #   CLOUDINARY_CLOUD_NAME / _API_KEY / _API_SECRET
 # Optional repo secrets (job defaults, overridable per run):
 #   MAX_NUMBER_OF_UPSCALES_PER_IMAGE (default 1) · DEFAULT_SCALE (default 4)
 #   UPSCALE_TILE_WORKERS (default auto)
-name: Upscale — batch
+name: Upscale — batch Etsy
 
 on:
   schedule:
-    # 07:00 UTC = 08:00 Maroc (UTC+1). During Ramadan Morocco runs UTC+0,
-    # so the job fires at 07:00 local then — documented in docs/UPSCALE.md.
-    - cron: "0 7 * * *"
+    - cron: "0 9 * * *"
   workflow_dispatch:
     inputs:
       worker_count:
@@ -48,7 +43,7 @@ on:
         required: false
         default: "10"
       max_upscales_per_image:
-        description: "Max upscales par image (vide = secret MAX_NUMBER_OF_UPSCALES_PER_IMAGE, sinon 1)"
+        description: "Max upscales par image de produit (vide = secret MAX_NUMBER_OF_UPSCALES_PER_IMAGE, sinon 1)"
         required: false
         default: ""
       scale:
@@ -64,7 +59,7 @@ on:
           - RealESRGAN_x2plus
         default: RealESRGAN_x4plus
       output_format:
-        description: "Format de sortie — jpg : prêt pour Adobe Stock, ~2-4 Mo (limite Cloudinary 10 Mo) ; png : lossless, lourd"
+        description: "Format de sortie — jpg : ~2-4 Mo (limite Cloudinary 10 Mo) ; png : lossless, lourd"
         type: choice
         options:
           - jpg
@@ -83,7 +78,7 @@ on:
         required: false
         default: "5"
       dry_run:
-        description: "Lister les images éligibles sans rien upscaler"
+        description: "Lister les images de produits éligibles sans rien upscaler"
         type: boolean
         default: false
 
@@ -91,7 +86,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: upscale-batch
+  group: upscale-etsy-batch
   cancel-in-progress: false
 
 jobs:
@@ -136,7 +131,7 @@ jobs:
           echo "::error::API unreachable after 60 attempts (~5 min) — open $URL in a browser to restart the Render service, then rerun this workflow."
           exit 1
 
-  # ── 2. N identical workers, each claiming different images ─────────────────
+  # ── 2. N identical workers, each claiming different product images ───────
   upscale:
     name: Worker ${{ matrix.worker }}
     needs: warmup
@@ -196,7 +191,7 @@ jobs:
             echo "basicsr already compatible — no patch needed"
           fi
 
-      - name: Run batch worker
+      - name: Run batch worker (Etsy product images)
         env:
           ASSET_API_URL: ${{ secrets.ASSET_API_URL }}
           ASSET_API_KEY: ${{ secrets.ASSET_API_KEY }}
@@ -214,4 +209,4 @@ jobs:
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
           fi
-          python scripts/upscale/batch.py --max-images "${{ inputs.max_images || '5' }}" $DRY_RUN_FLAG
+          python scripts/upscale/batch.py --source etsy --max-images "${{ inputs.max_images || '5' }}" $DRY_RUN_FLAG

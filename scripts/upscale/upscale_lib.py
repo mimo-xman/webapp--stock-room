@@ -128,7 +128,46 @@ DEFAULT_MODEL = "RealESRGAN_x4plus"
 DEFAULT_MAX_UPSCALES = 1   # mirrors the documented secret default
 DEFAULT_SCALE = 4          # mirrors the documented secret default
 DEFAULT_MAX_IMAGES = 5     # GitHub Actions free quota friendly
-DEFAULT_CLOUDINARY_FOLDER = "adobe-stock/upscales"
+
+# ── sources ──────────────────────────────────────────────────────────────────
+# 'images' → the sellable images (collection images_to_bay) — the historical
+#             target of the batch workflow, UNCHANGED behavior.
+# 'etsy'   → the images nested inside Etsy products (etsy_products.images[]) —
+#             same claim/release/upscale protocol, dedicated nested routes
+#             (the two collections were split apart, each keeps its own job).
+SOURCES = ("images", "etsy")
+SOURCE_IMAGES = "images"
+SOURCE_ETSY = "etsy"
+
+# Default Cloudinary folders — one per source keeps the media library tidy
+# and matches the two businesses (stock marketplaces vs Etsy products).
+DEFAULT_CLOUDINARY_FOLDERS = {
+    SOURCE_IMAGES: "adobe-stock/upscales",
+    SOURCE_ETSY: "etsy-products/upscales",
+}
+
+
+@dataclass
+class Ref:
+    """WHERE an image to upscale lives: a standalone sellable image
+    (images_to_bay) or one image nested inside an Etsy product. Both flow
+    through the same pipeline — only the API routes differ."""
+
+    source: str = SOURCE_IMAGES
+    image_id: str = ""
+    product_id: str = ""   # etsy only
+
+    @classmethod
+    def from_doc(cls, doc: dict) -> "Ref":
+        return cls(
+            source=str(doc.get("source") or SOURCE_IMAGES),
+            image_id=str(doc.get("_id") or ""),
+            product_id=str(doc.get("product_id") or ""),
+        )
+
+    @property
+    def label(self) -> str:
+        return "image Etsy" if self.source == SOURCE_ETSY else "image"
 
 # Parallel tile workers. "auto" = one worker per CPU core, capped at 4 —
 # the public-repo GitHub runners are 4-vCPU/16GB, and each worker runs the
@@ -161,6 +200,7 @@ class JobConfig:
     cloudinary_api_secret: str
     cloudinary_folder: str
     model_dir: str
+    source: str = SOURCE_IMAGES                        # 'images' | 'etsy'
     dry_run: bool = False
     run_id: str = ""
     output_format: str = DEFAULT_OUTPUT_FORMAT      # "jpg" (stock-ready) | "png" (lossless)
@@ -190,6 +230,12 @@ def resolve_tile_workers(raw) -> int:
 
 def build_config(args) -> JobConfig:
     """Resolve the job configuration from CLI args (priority) then env."""
+
+    source = str(getattr(args, "source", None) or SOURCE_IMAGES).strip().lower()
+    if source not in SOURCES:
+        raise JobError(
+            f"source inconnue : {source!r} — sources supportées : {', '.join(SOURCES)}"
+        )
 
     missing = []
 
@@ -273,9 +319,11 @@ def build_config(args) -> JobConfig:
         cloudinary_cloud_name=cloud_name,
         cloudinary_api_key=cloud_key,
         cloudinary_api_secret=cloud_secret,
-        cloudinary_folder=getattr(args, "cloudinary_folder", None) or DEFAULT_CLOUDINARY_FOLDER,
+        cloudinary_folder=getattr(args, "cloudinary_folder", None)
+        or DEFAULT_CLOUDINARY_FOLDERS.get(source, DEFAULT_CLOUDINARY_FOLDERS[SOURCE_IMAGES]),
         model_dir=getattr(args, "model_dir", None)
         or os.environ.get("UPSCALE_MODEL_DIR", os.path.expanduser("~/.cache/upscale-models")),
+        source=source,
         dry_run=bool(getattr(args, "dry_run", False)),
         run_id=os.environ.get("GITHUB_RUN_ID", ""),
         output_format=output_format,
@@ -287,6 +335,47 @@ def build_config(args) -> JobConfig:
 
 
 # ── asset database API client ────────────────────────────────────────────────
+
+# ── etsy normalization helpers ───────────────────────────────────────────────
+
+def _find_etsy_image(product: dict, image_id: str):
+    """The image sub-document with this id, or None."""
+    for im in product.get("images") or []:
+        if str(im.get("_id")) == str(image_id):
+            return im
+    return None
+
+
+def _normalize_etsy_image(product: dict, image: dict) -> dict:
+    """Flatten an (etsy product, nested image) pair into the SAME shape as a
+    standalone image doc — plus the routing keys `source` / `product_id` — so
+    the whole pipeline (dry-run, process_image, ClaimGuard) is source-blind."""
+    md = product.get("metadata") or {}
+    product_title = md.get("title") or "(produit sans titre)"
+    caption = (image.get("caption") or "").strip()
+    index = None
+    for i, im in enumerate(product.get("images") or []):
+        if str(im.get("_id")) == str(image.get("_id")):
+            index = i
+            break
+    label = caption or (f"image #{index + 1}" if index is not None else "image")
+    doc = dict(image)
+    doc["_id"] = str(image.get("_id"))
+    doc["source"] = SOURCE_ETSY
+    doc["product_id"] = str(product.get("_id"))
+    doc["product_title"] = product_title
+    doc["title"] = f"{product_title} — {label}"
+    return doc
+
+
+def _etsy_image_eligible(image: dict, max_upscales: int) -> bool:
+    """Dry-run eligibility for a nested etsy image: upscales below max,
+    active (absent field = active), not currently claimed."""
+    upscales = len(image.get("upscales") or [])
+    active = image.get("active") is not False
+    not_in_use = image.get("in_use") is not True
+    return upscales < max_upscales and active and not_in_use
+
 
 class AssetApi:
     """Thin HTTP client for the Stockroom API (X-API-Key, agent role)."""
@@ -371,19 +460,31 @@ class AssetApi:
             log(f"  tentative {attempt} : {detail} — nouvel essai dans {int(poll)}s…")
             time.sleep(poll)
 
-    # ── endpoints ──
+    # ── endpoints (source-aware: standalone images or nested etsy images) ──
 
-    def get_image(self, image_id: str):
-        """Return the image document, or None when it does not exist."""
-        resp = self._request("GET", f"/api/images/{image_id}")
+    def get_image(self, ref: Ref):
+        """Return the image document (normalized for both sources), or None
+        when it does not exist."""
+        if ref.source == SOURCE_ETSY:
+            resp = self._request("GET", f"/api/etsy-products/{ref.product_id}")
+            if resp.status_code == 404:
+                return None
+            product = self._json(resp, f"GET /api/etsy-products/{ref.product_id}")["data"]
+            image = _find_etsy_image(product, ref.image_id)
+            if image is None:
+                return None
+            return _normalize_etsy_image(product, image)
+        resp = self._request("GET", f"/api/images/{ref.image_id}")
         if resp.status_code == 404:
             return None
-        return self._json(resp, f"GET /api/images/{image_id}")["data"]
+        return self._json(resp, f"GET /api/images/{ref.image_id}")["data"]
 
-    def list_eligible(self, max_upscales: int, limit: int):
+    def list_eligible(self, source: str, max_upscales: int, limit: int):
         """Images eligible for the DRY-RUN listing: upscale count BELOW
         max_upscales, active, not currently claimed (in_use), oldest first.
         The real processing uses claim() instead — atomic reservation."""
+        if source == SOURCE_ETSY:
+            return self._list_eligible_etsy(max_upscales, limit)
         collected = []
         page = 1
         while len(collected) < limit:
@@ -402,6 +503,8 @@ class AssetApi:
             )
             body = self._json(resp, "GET /api/images (images éligibles)")
             data = body.get("data", [])
+            for d in data:
+                d["source"] = SOURCE_IMAGES
             collected.extend(data)
             pagination = body.get("pagination", {})
             if not data or page >= pagination.get("totalPages", 1):
@@ -409,14 +512,47 @@ class AssetApi:
             page += 1
         return collected[:limit]
 
-    def download_image(self, image_id: str, wake_retries: int = 2, wake_backoff: float = 20):
+    def _list_eligible_etsy(self, max_upscales: int, limit: int):
+        """Etsy edition of the dry-run listing: walks the products (they are
+        few), expands their images and keeps the eligible ones. Products are
+        listed oldest-first so the order matches the claim policy."""
+        collected = []
+        page = 1
+        while len(collected) < limit:
+            resp = self._request(
+                "GET",
+                "/api/etsy-products",
+                params={
+                    "limit": 100,
+                    "page": page,
+                    "sort": "createdAt",
+                    "order": "asc",
+                },
+            )
+            body = self._json(resp, "GET /api/etsy-products (images éligibles)")
+            data = body.get("data", [])
+            for product in data:
+                for image in product.get("images") or []:
+                    if _etsy_image_eligible(image, max_upscales):
+                        collected.append(_normalize_etsy_image(product, image))
+            pagination = body.get("pagination", {})
+            if not data or page >= pagination.get("totalPages", 1):
+                break
+            page += 1
+        return collected[:limit]
+
+    def download_image(self, ref: Ref, wake_retries: int = 2, wake_backoff: float = 20):
         """Fetch the ORIGINAL image bytes through the API download proxy.
         Returns (bytes, content_type). Raises ImageSkipped on dead links.
 
         A 502 often just means the ORIGIN service (the image host — typically
         another Render free-tier service) is waking up: we retry before
         declaring the link dead."""
-        resp = self._request("GET", f"/api/images/{image_id}/download")
+        if ref.source == SOURCE_ETSY:
+            path = f"/api/etsy-products/{ref.product_id}/images/{ref.image_id}/download"
+        else:
+            path = f"/api/images/{ref.image_id}/download"
+        resp = self._request("GET", path)
         attempt = 0
         while resp.status_code == 502 and attempt < wake_retries:
             attempt += 1
@@ -425,7 +561,7 @@ class AssetApi:
                 f"(Render) ; nouvel essai dans {int(wake_backoff)}s ({attempt}/{wake_retries})…"
             )
             time.sleep(wake_backoff)
-            resp = self._request("GET", f"/api/images/{image_id}/download")
+            resp = self._request("GET", path)
         if resp.status_code == 502:
             body = {}
             try:
@@ -441,17 +577,19 @@ class AssetApi:
             raise ImageSkipped("image absente de la base (404)")
         if not 200 <= resp.status_code < 300:
             raise JobError(
-                f"Téléchargement de l'image {image_id} échoué (HTTP {resp.status_code}) — relancez le job."
+                f"Téléchargement de {ref.label} {ref.image_id} échoué (HTTP {resp.status_code}) — relancez le job."
             )
         content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         return resp.content, content_type
 
-    def add_upscale(self, image_id: str, payload: dict) -> dict:
-        """POST /api/images/:id/upscales — register the upscaled variant.
-        Returns the updated image document. Raises LimitReached on 409."""
-        resp = self._request(
-            "POST", f"/api/images/{image_id}/upscales", json=payload
-        )
+    def add_upscale(self, ref: Ref, payload: dict) -> dict:
+        """POST …/upscales — register the upscaled variant. Returns the updated
+        image document. Raises LimitReached on 409."""
+        if ref.source == SOURCE_ETSY:
+            path = f"/api/etsy-products/{ref.product_id}/images/{ref.image_id}/upscales"
+        else:
+            path = f"/api/images/{ref.image_id}/upscales"
+        resp = self._request("POST", path, json=payload)
         if resp.status_code == 409:
             body = {}
             try:
@@ -461,29 +599,49 @@ class AssetApi:
             raise LimitReached(
                 f"limite atteinte côté API (409) — {body.get('error', {}).get('message', '')}"
             )
-        return self._json(resp, f"POST /api/images/{image_id}/upscales")["data"]
+        return self._json(resp, f"POST {path}")["data"]
 
     # ── parallel batch workers: claim / release ──
 
-    def claim(self, max_upscales: int, stale_minutes: int = 30):
-        """POST /api/images/claim — atomically reserve ONE eligible image
-        (upscales < max_upscales, active, not already claimed — a claim older
-        than stale_minutes is considered dead and reclaimable).
+    def claim(self, source: str, max_upscales: int, stale_minutes: int = 30):
+        """POST /api/<images|etsy-products>/claim — atomically reserve ONE
+        eligible image (upscales < max_upscales, active, not already claimed —
+        a claim older than stale_minutes is considered dead and reclaimable).
 
-        Returns the claimed image document, or None when nothing is claimable
-        (the worker exits its loop). The reservation is written by the same
-        findOneAndUpdate that selects the document: two concurrent workers can
-        never reserve the same image."""
+        Returns the claimed image document (normalized, source-aware), or
+        None when nothing is claimable (the worker exits its loop). The
+        reservation is written by the same findOneAndUpdate that selects the
+        document: two concurrent workers can never reserve the same image."""
+        if source == SOURCE_ETSY:
+            resp = self._request(
+                "POST",
+                "/api/etsy-products/claim",
+                json={"max_upscales": max_upscales, "stale_minutes": stale_minutes},
+            )
+            body = self._json(resp, "POST /api/etsy-products/claim")
+            data = body.get("data")
+            if not data:
+                return None
+            doc = _normalize_etsy_image(data.get("product") or {}, data.get("image") or {})
+            if data.get("image_index") is not None:
+                doc["image_index"] = data["image_index"]
+            return doc
         resp = self._request(
             "POST",
             "/api/images/claim",
             json={"max_upscales": max_upscales, "stale_minutes": stale_minutes},
         )
         body = self._json(resp, "POST /api/images/claim")
-        return body.get("data")
+        data = body.get("data")
+        if not data:
+            return None
+        doc = dict(data)
+        doc["_id"] = str(doc.get("_id"))
+        doc["source"] = SOURCE_IMAGES
+        return doc
 
-    def release(self, image_id: str, status: str, error_message: str = ""):
-        """POST /api/images/:id/release — report the terminal state of a claim.
+    def release(self, ref: Ref, status: str, error_message: str = ""):
+        """POST …/release — report the terminal state of a claim.
 
         status:
           'ok'      → success — in_use cleared, error_message cleared
@@ -494,14 +652,18 @@ class AssetApi:
         A 404 (the image was deleted meanwhile) is tolerated → returns None.
         Best-effort by design: if the call itself fails, the stale window
         (default 30 min) eventually frees the claim anyway."""
+        if ref.source == SOURCE_ETSY:
+            path = f"/api/etsy-products/{ref.product_id}/images/{ref.image_id}/release"
+        else:
+            path = f"/api/images/{ref.image_id}/release"
         payload = {"status": status}
         if error_message:
             payload["error_message"] = error_message
-        resp = self._request("POST", f"/api/images/{image_id}/release", json=payload)
+        resp = self._request("POST", path, json=payload)
         if resp.status_code == 404:
-            log(f"· release {image_id} : image introuvable (404) — ignoré")
+            log(f"· release {ref.image_id} : introuvable (404) — ignoré")
             return None
-        return self._json(resp, f"POST /api/images/{image_id}/release")["data"]
+        return self._json(resp, f"POST {path}")["data"]
 
 
 # ── Cloudinary upload (happens on the runner, NOT on the API) ────────────────
@@ -946,14 +1108,17 @@ def process_image(config: JobConfig, api: AssetApi, upscaler: RealEsrganUpscaler
                   uploader: CloudinaryUploader, image_doc: dict) -> dict:
     """Download → upscale → upload to Cloudinary → register in the API.
 
+    Works identically for both sources — the image_doc carries the routing
+    keys (`source`, `product_id`) and Ref.from_doc derives the API paths.
     Returns a result record {status: ok, …}. Raises ImageSkipped / JobError.
     """
+    ref = Ref.from_doc(image_doc)
     image_id = str(image_doc["_id"])
     title = image_doc.get("title", "(sans titre)")
     current = len(image_doc.get("upscales") or [])
 
     # The listing may be a few minutes old — re-check the fresh count.
-    fresh = api.get_image(image_id)
+    fresh = api.get_image(ref)
     if fresh is None:
         raise ImageSkipped("image supprimée de la base entre-temps")
     current = len(fresh.get("upscales") or [])
@@ -966,7 +1131,7 @@ def process_image(config: JobConfig, api: AssetApi, upscaler: RealEsrganUpscaler
 
     # 1. download the original through the API proxy
     with Heartbeat(f"téléchargement de l'image source [{image_id}]"):
-        data, content_type = api.download_image(image_id)
+        data, content_type = api.download_image(ref)
     if len(data) < 1000:
         raise ImageSkipped(f"fichier source trop petit ou vide ({len(data)} octets)")
 
@@ -995,7 +1160,7 @@ def process_image(config: JobConfig, api: AssetApi, upscaler: RealEsrganUpscaler
             uploaded = uploader.upload(out_path, public_id)
 
     # 4. register on the image document
-    updated = api.add_upscale(image_id, {
+    updated = api.add_upscale(ref, {
         "url": uploaded["url"],
         "public_id": uploaded["public_id"],
         "scale": config.scale,
@@ -1008,7 +1173,7 @@ def process_image(config: JobConfig, api: AssetApi, upscaler: RealEsrganUpscaler
         "max_upscales": config.max_upscales,
     })
 
-    return {
+    record = {
         "status": "ok",
         "image_id": image_id,
         "title": title,
@@ -1019,6 +1184,9 @@ def process_image(config: JobConfig, api: AssetApi, upscaler: RealEsrganUpscaler
         "url": uploaded["url"],
         "upscales_count": len(updated.get("upscales") or []),
     }
+    if ref.source == SOURCE_ETSY:
+        record["product_id"] = ref.product_id
+    return record
 
 
 # ── job summary (GitHub step summary / stdout) ───────────────────────────────

@@ -41,9 +41,17 @@ const endpointRows = [
   ['GET', '/api/images/:id/upscales/:upscaleId/download', 'Download an upscaled variant (proxy)', true],
   ['GET', '/api/etsy-products', 'List Etsy digital products — filters: session_id, product_type, used_in_etsy', true],
   ['POST', '/api/etsy-products', 'Create a product — images[] + one shared Etsy listing metadata block', true],
+  ['POST', '/api/etsy-products/claim', 'PARALLEL BATCH WORKER (Etsy edition) — atomically reserve the oldest eligible PRODUCT IMAGE (upscales < max, active, free). Body { max_upscales?, stale_minutes? } → { data: { product_id, image_id, image, product } | null, claimed }', true],
   ['GET', '/api/etsy-products/:id', 'One product (all its images + metadata)', true],
   ['PATCH', '/api/etsy-products/:id', 'Edit product fields (metadata merge, images, used_in_etsy…)', true],
   ['POST', '/api/etsy-products/:id/images', 'Append ONE image (e.g. a finished coloring page) to a product', true],
+  ['PATCH', '/api/etsy-products/:id/images/:imageId', 'Edit ONE product image — caption/role, active (pause & reactivate), error_message (dismiss)', true],
+  ['POST', '/api/etsy-products/:id/images/:imageId/release', 'Batch worker reports the attempt outcome on that image — { status: ok|stopped|error, error_message? }', true],
+  ['GET', '/api/etsy-products/:id/images/:imageId/download', 'Download ONE product image (server-side proxy)', true],
+  ['POST', '/api/etsy-products/:id/images/:imageId/upscales', 'Register an upscaled variant on a product image (Real-ESRGAN job) — 409 UPSCALE_LIMIT_REACHED at max_upscales', true],
+  ['PATCH', '/api/etsy-products/:id/images/:imageId/upscales/:upscaleId', 'Mark a product-image upscale used / unused', true],
+  ['DELETE', '/api/etsy-products/:id/images/:imageId/upscales/:upscaleId', 'Delete a product-image upscale (+ Cloudinary destroy when configured)', true],
+  ['GET', '/api/etsy-products/:id/images/:imageId/upscales/:upscaleId/download', 'Download a product-image upscale (proxy)', true],
   ['DELETE', '/api/etsy-products/:id', 'Delete a product', true],
 ];
 

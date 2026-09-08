@@ -19,6 +19,7 @@ const {
   etsyProductCreateSchema,
   etsyProductUpdateSchema,
   etsyProductAddImageSchema,
+  etsyImageUpdateSchema,
 } = require('../schemas');
 const authController = require('../controllers/authController');
 const sessionController = require('../controllers/sessionController');
@@ -86,9 +87,25 @@ router.get('/api/images/:id/upscales/:upscaleId/download', imageController.downl
 // etsy products (digital products sold on Etsy: coloring books, invitations…)
 router.get('/api/etsy-products', etsyProductController.list);
 router.post('/api/etsy-products', validate(etsyProductCreateSchema), etsyProductController.create);
+// NOTE: /api/etsy-products/claim MUST stay ABOVE /api/etsy-products/:id —
+// 'claim' would otherwise be treated as an id.
+// Parallel batch workers: atomically reserve the oldest eligible PRODUCT IMAGE.
+router.post('/api/etsy-products/claim', validate(imageClaimSchema), etsyProductController.claim);
 router.get('/api/etsy-products/:id', etsyProductController.getOne);
 router.patch('/api/etsy-products/:id', validate(etsyProductUpdateSchema), etsyProductController.update);
 router.post('/api/etsy-products/:id/images', validate(etsyProductAddImageSchema), etsyProductController.addImage);
 router.delete('/api/etsy-products/:id', etsyProductController.remove);
+
+// etsy product images — per-image worker coordination + webapp edits
+// (nested images carry their own upscales, in_use / active / error_message).
+router.patch('/api/etsy-products/:id/images/:imageId', validate(etsyImageUpdateSchema), etsyProductController.updateImage);
+router.post('/api/etsy-products/:id/images/:imageId/release', validate(imageReleaseSchema), etsyProductController.releaseImage);
+router.get('/api/etsy-products/:id/images/:imageId/download', etsyProductController.downloadImage);
+
+// etsy image upscales (Real-ESRGAN derivatives — same protocol as the images)
+router.post('/api/etsy-products/:id/images/:imageId/upscales', validate(upscaleCreateSchema), etsyProductController.addUpscale);
+router.patch('/api/etsy-products/:id/images/:imageId/upscales/:upscaleId', validate(upscaleUpdateSchema), etsyProductController.updateUpscale);
+router.delete('/api/etsy-products/:id/images/:imageId/upscales/:upscaleId', etsyProductController.removeUpscale);
+router.get('/api/etsy-products/:id/images/:imageId/upscales/:upscaleId/download', etsyProductController.downloadUpscale);
 
 module.exports = router;

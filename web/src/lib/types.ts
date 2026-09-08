@@ -165,9 +165,18 @@ export interface EtsyProductImage {
   image_link: string;
   role: EtsyImageRole;
   caption: string;
+  /** The exact generation prompt that produced this image (agent traceability). */
+  prompt?: string;
   ratio: string;
   quality: string;
   upscales?: Upscale[];
+  /** Batch-worker coordination (parallel upscale workflow) — same semantics
+   *  as StockImage. Absent on images migrated before the feature — treat
+   *  absent as active/not-in-use. */
+  active?: boolean;
+  in_use?: boolean;
+  in_use_at?: string;
+  error_message?: string;
 }
 
 export interface EtsyProductMetadata {

@@ -349,7 +349,10 @@ const etsyProductCreateSchema = z
     product_type: z.enum(ETSY_PRODUCT_TYPES).optional().default('digital_download'),
     images: z.array(etsyProductImageSchema).min(1, 'at least one image is required').max(200),
     metadata: etsyMetadataSchema,
-    file_link: httpUrl.optional().default(''),
+    // NB: union with the empty literal — a bare `.default('')` on httpUrl would
+    // validate the DEFAULT VALUE itself and reject every creation without a
+    // deliverable file (latent bug caught by the e2e suite).
+    file_link: z.union([httpUrl, z.literal('')]).optional().default(''),
     used_in_etsy: z.boolean().optional().default(false),
   })
   .refine((v) => !v.file_link || v.file_link !== '', {
@@ -382,6 +385,20 @@ const etsyProductAddImageSchema = z.object({
   quality: z.enum(['1K', '2K', '4K']).optional(),
 });
 
+// PATCH /api/etsy-products/:id/images/:imageId — webapp edits on ONE product
+// image: caption/role, pause & reactivate (active), dismiss the batch-worker
+// error message. (The claim/release/upscales bodies reuse the image schemas.)
+const etsyImageUpdateSchema = z
+  .object({
+    role: z.enum(['cover', 'page', 'asset', 'preview']).optional(),
+    caption: z.string().trim().max(200).optional(),
+    active: z.boolean().optional(),
+    error_message: z.string().trim().max(2000).optional(),
+  })
+  .refine((obj) => Object.keys(obj).length > 0, {
+    message: 'provide at least one field to update',
+  });
+
 module.exports = {
   verifySchema,
   sessionCreateSchema,
@@ -394,4 +411,5 @@ module.exports = {
   etsyProductCreateSchema,
   etsyProductUpdateSchema,
   etsyProductAddImageSchema,
+  etsyImageUpdateSchema,
 };

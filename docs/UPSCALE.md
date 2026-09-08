@@ -6,6 +6,21 @@ uploadées sur **Cloudinary**, et enregistrées sur le document image dans
 MongoDB (`upscales[]`). La webapp les affiche avec les actions
 **Mark used / Download / Delete**.
 
+Depuis la séparation des deux métiers, la fonctionnalité couvre **les deux
+collections** avec la même machine (claim atomique → Real-ESRGAN → Cloudinary
+→ release), mais des workflows et routes dédiés :
+
+| Cible | Collection | Workflow quotidien | Routes API | Dossier Cloudinary |
+|---|---|---|---|---|
+| Images à vendre | `images_to_bay` | `Upscale — batch` (08:00 Maroc) | `/api/images/…` | `adobe-stock/upscales` |
+| Images de produits Etsy | `etsy_products.images[]` | `Upscale — batch Etsy` (10:00 Maroc) | `/api/etsy-products/:id/images/:imageId/…` | `etsy-products/upscales` |
+
+Chaque image imbriquée d'un produit Etsy porte son **propre** tableau
+`upscales[]` et ses champs worker (`active`, `in_use`, `in_use_at`,
+`error_message`) — mêmes sémantiques que les images à vendre. Le décalage de
+2 h entre les deux crons est voulu : les deux lots ne se réveillent jamais
+l'API Render en même temps.
+
 ```
  MongoDB (images)          GitHub Actions (ubuntu-latest)         Cloudinary
 ┌──────────────────┐      ┌───────────────────────────────┐     ┌─────────────┐
@@ -55,9 +70,12 @@ requis pour un dry-run). Décochez ensuite pour un vrai premier run.
 
 ---
 
-## 2. Les deux workflows
+## 2. Les workflows
 
 ### 2.1 `Upscale — batch` (`.github/workflows/upscale-batch.yml`) — **N jobs parallèles**
+
+> **Édition images à vendre** (`images_to_bay`) — le comportement historique,
+> inchangé. Pour les produits Etsy, voir 2.2.
 
 - **Quotidien à 08:00 Maroc** — cron `0 7 * * *` (UTC). Le Maroc est UTC+1
   toute l'année, sauf pendant le Ramadan où il passe à UTC+0 : le job
@@ -113,11 +131,36 @@ Chaque tentative d'un worker se termine TOUJOURS par un `release` :
 - Les images créées avant la fonctionnalité n'ont pas les champs
   `active`/`in_use` → considérées **actives et libres** (requêtes `$ne`).
 
+### 2.1bis `Upscale — batch Etsy` (`.github/workflows/upscale-etsy-batch.yml`)
+
+Même machine, mêmes inputs, mêmes secrets que 2.1 — mais pour les images
+**imbriquées dans les produits Etsy** (`etsy_products.images[]`) :
+
+- **Quotidien à 10:00 Maroc** — cron `0 9 * * *` (UTC). Le décalage de 2 h
+  avec le lot images évite que les deux workflows réveillent l'API Render
+  (free tier) en même temps et se partagent les 300 req/min de rate-limit.
+- Groupe de concurrence **distinct** (`upscale-etsy-batch`) : les deux lots
+  peuvent tourner simultanément en manuel sans s'annuler.
+- Chaque worker boucle sur `POST /api/etsy-products/claim` : réservation
+  **atomique d'une image de produit** (upscales < max, active, libre — la plus
+  ancienne d'abord). La réponse contient `product_id`, `image_id`,
+  `image_index`, l'image réservée et le produit complet.
+- Le pipeline est identique (le script est le même, `--source etsy`) :
+  download via
+  `GET /api/etsy-products/:id/images/:imageId/download` → Real-ESRGAN →
+  Cloudinary (dossier `etsy-products/upscales` par défaut) →
+  `POST /api/etsy-products/:id/images/:imageId/upscales` →
+  `POST /api/etsy-products/:id/images/:imageId/release`.
+- `dry_run` liste les images de produits éligibles (une ligne par image, du
+  style `Titre du livre — Page 1`).
+
 ### 2.2 `Upscale — single image` (`.github/workflows/upscale-single.yml`)
 
-Manuel uniquement. Inputs : `image_id` (requis, le `_id` MongoDB visible
-dans le détail d'une image dans la webapp), `max_upscales`, `scale`,
-`model`, `output_format`, `jpeg_quality`, `tile_workers`, `dry_run`.
+Manuel uniquement. Inputs : `source` (**image** — une image à vendre, ou
+**etsy-product-image** — une image d'un produit Etsy, `product_id` alors
+requis : les deux `_id` sont affichés avec boutons de copie dans le popup de
+détail du produit), `image_id` (requis), `product_id`, `max_upscales`,
+`scale`, `model`, `output_format`, `jpeg_quality`, `tile_workers`, `dry_run`.
 
 Comportement (messages clairs dans les logs et le résumé) :
 
@@ -158,6 +201,30 @@ Chaque variante est ajoutée par le job via `POST /api/images/:id/upscales` :
 Le « nombre d'upscales » d'une image = `upscales.length` (les images créées
 avant la fonctionnalité n'ont pas de champ `upscales` → considéré comme 0).
 
+**Même format imbriqué sur les produits Etsy** — chaque image d'un produit
+porte son propre `upscales[]` et les mêmes champs de coordination :
+
+```jsonc
+// etsy_products
+{
+  "_id": "…",
+  "metadata": { "title": "Cozy Castle Coloring Book", … },
+  "images": [
+    {
+      "_id": "…",               // ObjectId propre à l'image imbriquée
+      "image_link": "https://…/page-01.png",
+      "role": "page", "caption": "Page 1 — castle",
+      "upscales": [ … ],          // MÊME format que ci-dessus
+      "active": true, "in_use": false,
+      "in_use_at": null, "error_message": ""
+    }
+  ]
+}
+```
+
+(Images migrées avant la fonctionnalité : champs absents = actives et
+libres — mêmes sémantiques `$ne` que les images à vendre.)
+
 Champs de coordination des workers parallèles (voir §2.1.1) :
 
 ```jsonc
@@ -188,6 +255,20 @@ Champs de coordination des workers parallèles (voir §2.1.1) :
 `{ "active": true|false }` (réactiver/mettre en pause) et
 `{ "error_message": "" }` (dismiss de la bannière d'erreur).
 
+**Édition Etsy** — les mêmes routes, préfixées par produit + image
+(auth identique) :
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `POST` | `/api/etsy-products/claim` | Réservation atomique d'**une image de produit** éligible. Réponse `{ data: { product_id, image_id, image_index, product, image } \| null, claimed, max_upscales }` |
+| `POST` | `/api/etsy-products/:id/images/:imageId/release` | Fin de tentative sur cette image — même sémantique ok/stopped/error |
+| `PATCH` | `/api/etsy-products/:id/images/:imageId` | Edition webapp d'une image de produit — `{ role?, caption?, active?, error_message? }` |
+| `GET` | `/api/etsy-products/:id/images/:imageId/download` | Proxy de téléchargement de l'image (nommage `<slug-produit>-<slug-page>`) |
+| `POST` | `/api/etsy-products/:id/images/:imageId/upscales` | Enregistrer une variante sur cette image — 409 à la limite |
+| `PATCH` | `/api/etsy-products/:id/images/:imageId/upscales/:upscaleId` | « Mark used » d'une variante |
+| `DELETE` | `/api/etsy-products/:id/images/:imageId/upscales/:upscaleId` | Supprimer la variante (+ destruction Cloudinary best effort) |
+| `GET` | `/api/etsy-products/:id/images/:imageId/upscales/:upscaleId/download` | Télécharger la variante (proxy) |
+
 Filtres de listing ajoutés sur `GET /api/images` :
 
 - `has_upscales=true|false` — avec / sans upscale (utilisé par la webapp) ;
@@ -208,6 +289,16 @@ Filtres de listing ajoutés sur `GET /api/images` :
   **Delete** (confirmation — l'original n'est jamais touché).
 - Le sélecteur de variantes sous la preview permet de basculer
   **Original / ×4 / ×2…** ; le tampon affiché correspond à la variante vue.
+- **Détail d'un produit Etsy** : même système — visionneuse image par image
+  (boutons préc/suiv + touches ←/→), **métadonnées Etsy du produit et infos
+  de l'image courante à droite**, et le **même sélecteur de variantes sous la
+  preview** (Original / ×N de l'image courante, section *Upscales* avec les
+  mêmes actions View / Download / Cloudinary / Mark used / Delete). Bannières
+  *claimée par un worker* et *erreur d'upscale* (avec dismiss + pause/
+  réactivation) identiques, **par image de produit**. Les `_id` du produit et
+  de l'image courante sont affichés avec boutons de copie — c'est ce qu'il
+  faut coller dans le workflow *Upscale — single image* (source
+  `etsy-product-image`).
 - **Grille** : chip orange `×n` sur les cartes ayant des upscales ; filtres
   *Upscales* (With / Without) et **Status** (Active / Paused (failed)) sur la
   page Images — ce dernier retrouve rapidement les images en échec.

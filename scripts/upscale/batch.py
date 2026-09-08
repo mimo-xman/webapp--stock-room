@@ -5,9 +5,10 @@ Batch upscale — Real-ESRGAN via GitHub Actions, PARALLEL worker edition.
 The workflow runs N copies of this script at the same time (matrix jobs).
 Each copy loops:
 
-    claim one eligible image (atomic POST /api/images/claim —
-    upscales < max_upscales AND active AND not already claimed)
-        → upscale → upload Cloudinary → POST /api/images/:id/upscales
+    claim one eligible image (atomic POST — upscales count < max, active,
+    not already claimed; images_to_bay via /api/images/claim, or the images
+    nested in Etsy products via /api/etsy-products/claim with --source etsy)
+        → upscale → upload Cloudinary → POST …/upscales
         → release 'ok'
     claim the next one… until the API answers "nothing to claim".
 
@@ -22,6 +23,14 @@ image twice. Every attempt ALWAYS ends with a release:
 A claim older than --stale-minutes (default 30) is considered dead (a worker
 killed without cleanup) and is reclaimable — no image can stay locked forever.
 
+Sources:
+  --source images (default) — sellable images (images_to_bay). The historical
+      behavior, unchanged: the daily upscale-batch workflow runs this.
+  --source etsy             — the images nested inside Etsy products
+      (etsy_products.images[]). Same protocol, dedicated routes: the daily
+      upscale-etsy-batch workflow runs this (own schedule, own concurrency
+      group, its own Cloudinary folder by default).
+
 Exit codes:
   0 — done (or nothing eligible, or dry-run listing)
   1 — fatal configuration/API error, or at least one image hard-failed
@@ -30,6 +39,7 @@ Exit codes:
 Run locally (see docs/UPSCALE.md):
   python3 scripts/upscale/batch.py --api-url http://localhost:3333 \
       --api-key <AGENT_KEY> --scale 4 --max-images 5 --dry-run
+  python3 scripts/upscale/batch.py --source etsy --dry-run
 """
 
 from __future__ import annotations
@@ -45,6 +55,8 @@ from upscale_lib import (
     JobError,
     LimitReached,
     RealEsrganUpscaler,
+    Ref,
+    SOURCE_ETSY,
     build_config,
     handle_fatal,
     log,
@@ -106,6 +118,12 @@ def parse_args(argv):
         help="Format de sortie : jpg (défaut — prêt pour Adobe Stock, ~2-4 Mo) ou png (lossless, lourd)",
     )
     parser.add_argument("--jpeg-quality", default="", help="Qualité JPEG 80-100 (défaut : 95, réduite auto si > limite Cloudinary)")
+    parser.add_argument(
+        "--source",
+        default="",
+        choices=["", "images", "etsy"],
+        help="Cible : images = images à vendre (images_to_bay, défaut) ; etsy = images imbriquées dans les produits Etsy",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Lister les images éligibles sans rien faire")
     return parser.parse_args(argv)
 
@@ -119,7 +137,7 @@ class ClaimGuard:
     def __init__(self, api: AssetApi, stale_minutes: int):
         self.api = api
         self.stale_minutes = stale_minutes
-        self.image_id: str | None = None
+        self.ref: Ref | None = None
         self.title: str = ""
         # Cancellation → release as 'stopped' before dying.
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -134,18 +152,18 @@ class ClaimGuard:
         sys.exit(128 + signum)
 
     def hold(self, image_doc: dict) -> None:
-        self.image_id = str(image_doc["_id"])
+        self.ref = Ref.from_doc(image_doc)
         self.title = image_doc.get("title", "")
 
     def release(self, status: str, error_message: str = "") -> None:
-        if not self.image_id:
+        if not self.ref:
             return
-        image_id, self.image_id, self.title = self.image_id, None, ""
+        ref, self.ref, self.title = self.ref, None, ""
         try:
-            self.api.release(image_id, status, error_message)
+            self.api.release(ref, status, error_message)
         except Exception as e:  # noqa: BLE001 — release must never crash the loop
             log(
-                f"⚠ release {image_id} ({status}) a échoué — {e}. La fenêtre "
+                f"⚠ release {ref.image_id} ({status}) a échoué — {e}. La fenêtre "
                 f"stale ({self.stale_minutes} min) libérera la réservation."
             )
 
@@ -169,17 +187,18 @@ def main(argv=None) -> int:
     # ── dry-run: list eligible images WITHOUT claiming anything ──
     if config.dry_run:
         try:
-            images = api.list_eligible(config.max_upscales, config.max_images)
+            images = api.list_eligible(config.source, config.max_upscales, config.max_images)
         except JobError as e:
             return handle_fatal(e, "récupération des images éligibles")
+        source_label = "produits Etsy" if config.source == SOURCE_ETSY else "images à vendre"
         log(
-            f"[dry-run] {len(images)} image(s) éligible(s) "
+            f"[dry-run] {len(images)} {source_label} éligible(s) "
             f"(active, non réservée, < {config.max_upscales} upscale(s)) :"
         )
         for i in images:
             log(f"  · {i.get('title')} [{i['_id']}] — {len(i.get('upscales') or [])}/{config.max_upscales} upscales")
         write_summary(
-            "Upscale batch — dry-run",
+            f"Upscale batch — dry-run ({'Etsy' if config.source == SOURCE_ETSY else 'images'})",
             f"{len(images)} image(s) éligible(s) (aucun traitement effectué).",
             [
                 {"status": "skipped", "image_id": str(i["_id"]), "title": i.get("title", ""),
@@ -190,9 +209,9 @@ def main(argv=None) -> int:
         return 0
 
     log(
-        f"Politique : max {config.max_upscales} upscale(s)/image · échelle ×{config.scale} · "
-        f"modèle {config.model} · {config.max_images} image(s) max par worker · "
-        f"{config.tile_workers} worker(s) de tuiles"
+        f"Politique : source {config.source} · max {config.max_upscales} upscale(s)/image · "
+        f"échelle ×{config.scale} · modèle {config.model} · {config.max_images} image(s) max "
+        f"par worker · {config.tile_workers} worker(s) de tuiles"
     )
 
     # ── heavy setup: model + Cloudinary pool (before the first claim, so
@@ -211,14 +230,15 @@ def main(argv=None) -> int:
     # ── claim loop: keep going until the API says "nothing to claim" ──
     while processed < config.max_images:
         try:
-            image_doc = api.claim(config.max_upscales, config.stale_minutes)
+            image_doc = api.claim(config.source, config.max_upscales, config.stale_minutes)
         except JobError as e:
             return handle_fatal(e, "réservation d'image (claim)")
 
         if image_doc is None:
             if processed == 0 and not results:
+                source_label = "aucune image Etsy" if config.source == SOURCE_ETSY else "aucune image"
                 log(
-                    "✓ Aucune image éligible — toutes ont atteint leur quota "
+                    f"✓ {source_label.title()} éligible — toutes ont atteint leur quota "
                     "d'upscales, sont en pause (active:false) ou sont réservées."
                 )
             else:
@@ -278,9 +298,11 @@ def main(argv=None) -> int:
 
     failed = sum(1 for r in results if r["status"] == "failed")
     ok = sum(1 for r in results if r["status"] == "ok")
+    source_label = "Etsy product images" if config.source == SOURCE_ETSY else "sellable images"
     write_summary(
-        "Upscale batch (worker parallèle)",
-        f"Échelle ×{config.scale} · modèle {config.model} · max {config.max_upscales} upscale(s)/image · "
+        f"Upscale batch — {source_label} (worker parallèle)",
+        f"Source {config.source} · échelle ×{config.scale} · modèle {config.model} · "
+        f"max {config.max_upscales} upscale(s)/image · "
         f"{config.tile_workers} worker(s) de tuiles.",
         results,
     )

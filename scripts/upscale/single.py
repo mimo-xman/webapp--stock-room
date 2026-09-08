@@ -30,6 +30,8 @@ from upscale_lib import (
     JobError,
     LimitReached,
     RealEsrganUpscaler,
+    Ref,
+    SOURCE_ETSY,
     build_config,
     handle_fatal,
     log,
@@ -46,7 +48,19 @@ def parse_args(argv):
     parser.add_argument(
         "--image-id",
         required=True,
-        help="MongoDB _id de l'image (24 caractères hex, visible dans la webapp)",
+        help="MongoDB _id de l'image (24 hex) — image à vendre, OU image imbriquée dans un produit Etsy (--source etsy)",
+    )
+    parser.add_argument(
+        "--product-id",
+        default="",
+        dest="product_id",
+        help="_id du produit Etsy — requis avec --source etsy (l'image visée vit dans etsy_products.images[])",
+    )
+    parser.add_argument(
+        "--source",
+        default="",
+        choices=["", "images", "etsy"],
+        help="Cible : images (défaut) = image à vendre ; etsy = image imbriquée dans un produit Etsy",
     )
     parser.add_argument("--api-url", default="", help="Asset API base URL (défaut : secret ASSET_API_URL)")
     parser.add_argument("--api-key", default="", help="Clé de l'agent (défaut : secret ASSET_API_KEY)")
@@ -84,11 +98,19 @@ def parse_args(argv):
 def main(argv=None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
     image_id = args.image_id.strip()
+    product_id = (args.product_id or "").strip()
 
     try:
         config = build_config(args)
     except JobError as e:
         return handle_fatal(e, "configuration du job")
+
+    ref = Ref(source=config.source, image_id=image_id, product_id=product_id)
+    if ref.source == SOURCE_ETSY and not product_id:
+        return handle_fatal(
+            JobError("--source etsy exige --product-id (l'_id du produit Etsy qui contient l'image)"),
+            "configuration du job",
+        )
 
     api = AssetApi(config.api_url, config.api_key)
 
@@ -100,16 +122,20 @@ def main(argv=None) -> int:
 
     # ── step 1 : the image must exist ──
     try:
-        image = api.get_image(image_id)
+        image = api.get_image(ref)
     except JobError as e:
-        return handle_fatal(e, f"récupération de l'image {image_id}")
+        return handle_fatal(e, f"récupération de {ref.label} {image_id}")
 
     if image is None:
+        where = (
+            f"produit Etsy {product_id}" if ref.source == SOURCE_ETSY else "la base"
+        )
         print(
             f"\n✖ IMAGE INTROUVABLE\n"
-            f"  Aucune image avec l'identifiant « {image_id} » dans la base.\n"
+            f"  Aucune image avec l'identifiant « {image_id} » dans {where}.\n"
             f"  → Vérifiez l'id dans la webapp (détail d'une image → champ « id »)\n"
-            f"  → ou listez les images : GET {config.api_url}/api/images?limit=100\n",
+            f"  → ou listez les images : GET {config.api_url}/api/images?limit=100\n"
+            f"  → produits Etsy : GET {config.api_url}/api/etsy-products?limit=100\n",
             file=sys.stderr,
             flush=True,
         )
@@ -166,7 +192,7 @@ def main(argv=None) -> int:
     except LimitReached as e:  # raced with another run / stale count
         message = f"Limite atteinte au moment d'enregistrer — {e}"
         log(f"\n🛑 STOP — {message}")
-        _best_effort_release(api, image_id, "stopped")
+        _best_effort_release(api, ref, "stopped")
         _close_upscaler(upscaler)
         write_summary(
             "Upscale image unique — stop",
@@ -175,7 +201,7 @@ def main(argv=None) -> int:
         )
         return 0
     except ImageSkipped as e:
-        _best_effort_release(api, image_id, "error", error_message=f"ignorée : {e}")
+        _best_effort_release(api, ref, "error", error_message=f"ignorée : {e}")
         _close_upscaler(upscaler)
         print(f"\n✖ IMPOSSIBLE DE TRAITER L'IMAGE\n  {e}\n", file=sys.stderr, flush=True)
         write_summary(
@@ -185,15 +211,15 @@ def main(argv=None) -> int:
         )
         return 1
     except JobError as e:
-        _best_effort_release(api, image_id, "error", error_message=str(e))
+        _best_effort_release(api, ref, "error", error_message=str(e))
         _close_upscaler(upscaler)
-        return handle_fatal(e, f"traitement de l'image {image_id}")
+        return handle_fatal(e, f"traitement de {ref.label} {image_id}")
     else:
-        _best_effort_release(api, image_id, "ok")
+        _best_effort_release(api, ref, "ok")
         _close_upscaler(upscaler)
 
     write_summary(
-        "Upscale image unique",
+        f"Upscale image unique — {'Etsy' if ref.source == SOURCE_ETSY else 'image à vendre'}",
         f"Échelle ×{config.scale} · modèle {config.model} · run {config.run_id or 'local'}.",
         [record],
     )
@@ -202,13 +228,13 @@ def main(argv=None) -> int:
     return 0
 
 
-def _best_effort_release(api: AssetApi, image_id: str, status: str, error_message: str = ""):
+def _best_effort_release(api: AssetApi, ref: Ref, status: str, error_message: str = ""):
     """release() without ever raising — a release failure must not mask the
     real outcome (the stale window recovers the lock anyway when relevant)."""
     try:
-        api.release(image_id, status, error_message)
+        api.release(ref, status, error_message)
     except Exception as e:  # noqa: BLE001
-        log(f"⚠ release {image_id} ({status}) a échoué — {e}")
+        log(f"⚠ release {ref.image_id} ({status}) a échoué — {e}")
 
 
 def _close_upscaler(upscaler):

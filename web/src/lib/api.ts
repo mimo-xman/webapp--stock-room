@@ -5,7 +5,7 @@
  * A 401 kicks the user back to the gate (password changed or wrong).
  */
 
-import type { ListParams, ListResponse, Session, StockImage, Upscale, EtsyProduct, EtsyProductImage, EtsyProductMetadata, EtsyProductType, ApiErrorPayload } from "./types";
+import type { ListParams, ListResponse, Session, StockImage, Upscale, EtsyProduct, EtsyProductImage, EtsyProductMetadata, EtsyProductType, EtsyImageRole, ApiErrorPayload } from "./types";
 import { getAppPassword, clearAppPassword } from "./auth";
 
 function resolveApiUrl(): string {
@@ -190,8 +190,86 @@ export const api = {
     addImage(id: string, image: Partial<EtsyProductImage>): Promise<{ data: EtsyProduct }> {
       return request(`/api/etsy-products/${id}/images`, { method: "POST", body: JSON.stringify(image) });
     },
+
+    /** Per-image edits: caption/role, pause & reactivate (active),
+     *  dismiss the batch-worker error message. */
+    images: {
+      update(productId: string, imageId: string, patch: { role?: EtsyImageRole; caption?: string; active?: boolean; error_message?: string }): Promise<{ data: EtsyProduct }> {
+        return request(`/api/etsy-products/${productId}/images/${imageId}`, {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+        });
+      },
+
+      /** Download one product image via the server proxy (avoids CORS /
+       *  dead-link issues). */
+      async download(product: EtsyProduct, image: EtsyProductImage, index: number): Promise<void> {
+        const password = getAppPassword();
+        const res = await fetch(
+          `${API_URL}/api/etsy-products/${product._id}/images/${image._id}/download`,
+          { headers: password ? { "X-App-Password": password } : {} },
+        );
+        if (!res.ok) {
+          const json = await res.json().catch(() => null);
+          throw new ApiError(res.status, (json && json.error) || undefined);
+        }
+        const blob = await res.blob();
+        const ext = (image.image_link.split("?")[0].split(".").pop() || "png").toLowerCase().slice(0, 5);
+        saveBlob(blob, `${slugProductFile(product, image, index)}.${ext}`);
+      },
+    },
+
+    /** Upscaled variants on the nested product images (Real-ESRGAN via
+     *  GitHub Actions — same protocol as the sellable images). */
+    upscales: {
+      /** Toggle the "Mark used" stamp on one variant of a product image. */
+      update(productId: string, imageId: string, upscaleId: string, patch: { used_in_adobe_stock: boolean }): Promise<{ data: EtsyProduct }> {
+        return request(`/api/etsy-products/${productId}/images/${imageId}/upscales/${upscaleId}`, {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+        });
+      },
+
+      /** Delete one variant — the server also destroys the Cloudinary asset
+       *  when the API is configured with CLOUDINARY_* env vars. */
+      remove(productId: string, imageId: string, upscaleId: string): Promise<{ data: { deleted: boolean; upscalesRemaining: number; cloudinary?: { destroyed: boolean; note?: string } | null } }> {
+        return request(`/api/etsy-products/${productId}/images/${imageId}/upscales/${upscaleId}`, {
+          method: "DELETE",
+        });
+      },
+
+      /** Download one variant via the server proxy. */
+      async download(product: EtsyProduct, image: EtsyProductImage, index: number, upscale: Upscale): Promise<void> {
+        const password = getAppPassword();
+        const res = await fetch(
+          `${API_URL}/api/etsy-products/${product._id}/images/${image._id}/upscales/${upscale._id}/download`,
+          { headers: password ? { "X-App-Password": password } : {} },
+        );
+        if (!res.ok) {
+          const json = await res.json().catch(() => null);
+          throw new ApiError(res.status, (json && json.error) || undefined);
+        }
+        const blob = await res.blob();
+        const ext = (upscale.url.split("?")[0].split(".").pop() || "png").toLowerCase().slice(0, 5);
+        saveBlob(blob, `${slugProductFile(product, image, index)}_x${upscale.scale}.${ext}`);
+      },
+    },
   },
 };
+
+/** Download filename base for an Etsy product image (no extension). */
+function slugProductFile(product: EtsyProduct, image: EtsyProductImage, index: number): string {
+  const slug = (s: string) =>
+    (s || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 50) || "image";
+  const caption = image.caption?.trim() || `image-${index + 1}`;
+  return `${slug(product.metadata?.title)}-${slug(caption)}`;
+}
 
 function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
