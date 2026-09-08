@@ -5,6 +5,7 @@
  * - both global-rule markers present below the cut line
  * - 4a/4b/4c sections present
  * - the owner's RETRY RULES present, old 10-minute-wait protocol absent (all 9 prompts)
+ * - the 3-GENERATION BUDGET present, old "4 generations total" ceiling absent (all 9 prompts)
  */
 const fs = require("fs");
 const path = require("path");
@@ -53,6 +54,8 @@ for (const [file, vars] of Object.entries(SPECIFIC)) {
     ["all-vars-used", missing.length === 0],
     ["retry-rules", body.includes("RETRY RULES") && body.includes("2 minutes") &&
       !body.includes("wait ~10 minutes")],
+    ["budget", body.includes("3-GENERATION BUDGET") && body.includes("3 times in total") &&
+      !body.includes("4 generations total") && !body.includes("up to 3 attempts")],
   ];
   const bad = checks.filter(([, ok]) => !ok).map(([n]) => n);
   if (unknown.length) console.error(`  ${file}: unknown tokens: ${unknown.join(", ")}`);
@@ -70,6 +73,8 @@ for (const file of ["main.md", "stock-platforms.md", "coloring-book-etsy.md"]) {
     ["markers", body.includes("NO LIVING BEINGS") && body.includes("CLEARLY DIFFERENTIATED")],
     ["retry-rules", body.includes("RETRY RULES") && body.includes("2 minutes") &&
       !body.includes("wait ~10 minutes") && !body.includes("slow down / wait 10 min")],
+    ["budget", body.includes("3-GENERATION BUDGET") && body.includes("3 times in total") &&
+      !body.includes("4 generations total")],
   ];
   const bad = checks.filter(([, ok]) => !ok).map(([n]) => n);
   if (bad.length) { console.error(`FAIL ${file}: ${bad.join(", ")}`); failed++; }

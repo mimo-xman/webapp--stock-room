@@ -217,8 +217,8 @@ siblings is rejected and never saved, exactly like a GLOBAL CONTENT RULES violat
     generated image is never "probably fine": the model sometimes produces design defects
     (garbled text, misspelled headlines, unbalanced layouts, clipped borders, invented
     designs in promos) that a buyer WILL notice — and review negatively. Run the STEP 4c
-    checklist on every image and apply the regeneration loop (corrected prompt, up to 3
-    attempts, then redesign the layout) before saving anything. An image that still fails
+    checklist on every image and apply the regeneration loop (corrected prompt, max 3
+    generations per image, then redesign the layout) before saving anything. An image that still fails
     after the full loop is flagged "needs manual review" in the final report — never
     silently saved.
 
@@ -375,7 +375,11 @@ Settings (deliberate — print product):
     request and resubmit.
   - **Any other failure** — quota/limit error (e.g. code `6101`), upstream 5xx, timeout, rate
     limit, network error → NO waiting, NO skipping, NO subject change: immediately resubmit
-    the SAME prompt, and keep resubmitting until it succeeds.
+    the SAME prompt, and keep resubmitting until the job succeeds and an image is produced.
+  - **TECHNICAL failures only.** These rules cover jobs that produced NO image. A
+    successfully generated image that fails the visual quality check (STEP 4c) is NOT a
+    failed generation — it consumes the 3-GENERATION BUDGET (max 3 generations per
+    image). Never retry a badly-designed image endlessly.
   - **Safety valve — the ONLY wait rule:** count consecutive failed generations (every
     success resets the count to 0). When the count reaches 10, wait 2 minutes — never more —
     reset the count, then resume retrying. Repeat as many times as needed.
@@ -449,7 +453,7 @@ you forgot the `images` array: resubmit with it.
   the hero design shown match the real ones exactly, and you must report the fallback in
   the final report. Never fall back silently.
 
-### 4c — Visual quality check and regeneration loop (EVERY image — no exception)
+### 4c — Visual quality check and regeneration loop (EVERY image — max 3 generations)
 
 View each generated image at **full size** (not a thumbnail) BEFORE saving it, and run this
 checklist. The model sometimes produces images with design defects that no prompt can fully
@@ -482,26 +486,35 @@ and a paying customer. A defective image in a paid product = a refund or a negat
   low-detail render, anything that misrepresents the set, hands or people holding the
   cards (GLOBAL CONTENT RULES).
 
-**Regeneration loop (mandatory):**
+**Regeneration loop (mandatory — the 3-GENERATION BUDGET, hard cap):**
 
-1. **Attempt 1 fails → regenerate with a corrected prompt.** Keep the base formula, APPEND a
-   short `Fix:` clause naming the exact defect and the correction, e.g. `Fix: the front
-   wheels were detached from the body — draw one solid continuous outline, every part
-   physically attached to the vehicle, no floating elements.` One defect = one targeted fix
-   (do not rewrite the whole prompt, do not change the subject).
-2. **Attempt 2 fails → regenerate with the accumulated fix clause** (name BOTH defects) and
-   tighten the style constraints, e.g. append `extremely clean vector-like line art,
-   uniform stroke weight, generous white space.`
-3. **Attempt 3 fails → redesign the scene.** Same subject, DIFFERENT composition or angle
-   (side view → three-quarter view; close-up → full scene with ground and sky; one object
-   → two objects interacting). A prompt that failed three times will fail a fourth.
-4. **Hard ceiling: 3 regeneration attempts per image** (4 generations total). If the image
-   STILL fails: keep the best attempt, do NOT count an announcement image that misrepresents
-   the product (that one is never saved), and flag the image clearly in the final report as
-   "needs manual review" with the defect list — the owner decides. Never silently save a
-   defective image.
-5. **Log every rejection** as you go: role/caption, attempt #, defect found, fix applied.
-   STEP 6 requires this QC report.
+Every image, whatever its role (cover, content piece, announcement), is generated AT MOST
+**3 times in total**: the initial generation plus at most 2 regenerations. Time and image
+quota are real costs — regenerating one image 10 or 15 times is a wasted run and is
+FORBIDDEN. Technical failures (job `failed`, no image produced) do not count toward this
+budget — they follow the RETRY RULES (STEP 4a).
+
+1. **Generation 1 fails the check → regenerate with a corrected prompt** (generation 2 of
+   3). Keep the base formula, APPEND a short `Fix:` clause naming the exact defect and the
+   correction, e.g. `Fix: the front wheels were detached from the body — draw one solid
+   continuous outline, every part physically attached to the vehicle, no floating elements.`
+   One defect = one targeted fix (do not rewrite the whole prompt, do not change the
+   subject).
+2. **Generation 2 fails → regenerate ONE last time** (generation 3 of 3): accumulated fix
+   clause (name BOTH defects) + tightened style constraints (e.g. append `extremely clean
+   vector-like line art, uniform stroke weight, generous white space.`) + a scene redesign
+   — same subject, DIFFERENT composition or angle (side view → three-quarter view;
+   close-up → full scene with ground and sky; one object → two objects interacting). A
+   prompt that failed twice usually fails a third time unchanged — the redesign is what
+   breaks the pattern.
+3. **Generation 3 fails → STOP — a 4th generation is FORBIDDEN.** Keep the best of the 3
+   attempts (never one that breaks the GLOBAL CONTENT RULES or a HARD RULE — a forbidden
+   image is never saved), do NOT count an announcement image that misrepresents
+   the product (that one is never saved), and flag the image clearly in the final
+   report as "needs manual review" with the defect list — the owner decides. Never
+   silently save a defective image.
+4. **Log every rejection** as you go: role/caption, generation #, defect found, fix
+   applied. STEP 6 requires this QC report.
 
 If your runtime truly cannot view images, say so in the final report, enforce the strongest
 textual exclusions in every prompt, and rely on the reference-based mode (STEP 4b) as the

@@ -284,7 +284,11 @@ Headers: X-API-Key: [ZAZO IMAGE STUDIO API KEY]
     request and resubmit.
   - **Any other failure** — quota/limit error (e.g. code `6101`), upstream 5xx, timeout, rate
     limit, network error → NO waiting, NO skipping, NO subject change: immediately resubmit
-    the SAME prompt, and keep resubmitting until it succeeds.
+    the SAME prompt, and keep resubmitting until the job succeeds and an image is produced.
+  - **TECHNICAL failures only.** These rules cover jobs that produced NO image. A
+    successfully generated image that fails the visual check below is NOT a failed
+    generation — it consumes the 3-GENERATION BUDGET (max 3 generations per image).
+    Never retry a badly-designed image endlessly.
   - **Safety valve — the ONLY wait rule:** count consecutive failed generations (every
     success resets the count to 0). When the count reaches 10, wait 2 minutes — never more —
     reset the count, then resume retrying. Repeat as many times as needed.
@@ -295,9 +299,14 @@ Headers: X-API-Key: [ZAZO IMAGE STUDIO API KEY]
   small or stylized; and when the destination is a content platform, reject anything that
   fails the distinctiveness check too (GLOBAL DISTINCTIVENESS RULES 4: it reads as the
   default depiction of its subject, or as a sibling of another image from this run);
-  fix and regenerate when an image fails the check. If your runtime truly
-  cannot view images, say so in the final report and enforce the strongest textual exclusions
-  instead.
+  fix and regenerate when an image fails the check — under the 3-GENERATION BUDGET: each
+  image is generated AT MOST 3 times in total (the initial generation + at most 2
+  regenerations; a technically failed job that produced no image does not count — that one
+  follows the RETRY RULES). After the 3rd failed check: keep the best COMPLIANT attempt
+  and flag it "needs manual review" in the final report; if none of the 3 attempts
+  complies, do not save the image — flag it and let the owner decide. Never regenerate
+  endlessly. If your runtime truly cannot view images, say so in the final report and
+  enforce the strongest textual exclusions instead.
 - Generate sequentially (one job at a time) — the queue is serialized server-side anyway.
 
 ## STEP 5 — Register each result (Stock Room API)
