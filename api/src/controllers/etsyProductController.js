@@ -296,14 +296,39 @@ async function addImage(req, res, next) {
 const CLAIM_CANDIDATES = 3;
 const CLAIM_ATTEMPTS = 5;
 
+/** Upscale count of a candidate image — accepts BOTH shapes the claim sees:
+ *  the full sub-document (upscales = ARRAY of variants) and the aggregation
+ *  projection below (upscales = precomputed COUNT via $size).
+ *
+ *  These two shapes were once mixed up: eligibleImage read the projected
+ *  count with Array.isArray() → false → 0, so EVERY image of a candidate
+ *  product looked eligible. The claim then reserved the FIRST image of the
+ *  array — already at its quota — the worker skipped it, released it, and
+ *  the next claim took the very same image again: an infinite claim/skip
+ *  ping-pong across every worker. Reading both shapes correctly is the
+ *  permanent fix for that loop. */
+function imageUpscaleCount(im) {
+  if (Array.isArray(im.upscales)) return im.upscales.length;
+  const n = Number(im.upscales);
+  return Number.isInteger(n) && n >= 0 ? n : 0;
+}
+
 /** True when the product image is eligible for a claim: upscales below the
  *  policy max, active (absent field = active), and free (or its claim is
  *  older than the stale window — a worker that died without releasing). */
 function eligibleImage(im, effectiveMax, staleBefore) {
-  const upscales = Array.isArray(im.upscales) ? im.upscales.length : 0;
   const activeOk = im.active !== false;
   const free = im.in_use !== true || (im.in_use_at && im.in_use_at < staleBefore);
-  return upscales < effectiveMax && activeOk && free;
+  return imageUpscaleCount(im) < effectiveMax && activeOk && free;
+}
+
+/** Query fragment: an image whose upscales array holds FEWER than
+ *  `effectiveMax` entries. An array of length L exposes index i iff L > i,
+ *  so "index max-1 does not exist" ⟺ count < max — the only way to express
+ *  a size comparison inside a plain $elemMatch (no $expr there). Used to
+ *  make the atomic reservation re-check the quota, not just in_use. */
+function belowQuotaField(effectiveMax) {
+  return `upscales.${Math.max(effectiveMax - 1, 0)}`;
 }
 
 /** $expr helper: products holding at least one eligible image. */
@@ -403,13 +428,17 @@ async function claim(req, res, next) {
         if (!image) continue; // stale candidate view — try the next product
 
         // The atomic reservation itself: the findOneAndUpdate re-checks that
-        // the chosen image is still free, so two workers can never reserve it.
+        // the chosen image is still free AND still below its upscale quota
+        // (the aggregation view can be stale — another worker may have just
+        // registered the final upscale), so two workers can never reserve
+        // the same image, and a just-maxed image is never handed out.
         const doc = await EtsyProduct.findOneAndUpdate(
           {
             _id: candidate._id,
             images: {
               $elemMatch: {
                 _id: image._id,
+                [belowQuotaField(effectiveMax)]: { $exists: false },
                 $or: [
                   { in_use: { $ne: true } },
                   { in_use_at: { $lt: staleBefore } },

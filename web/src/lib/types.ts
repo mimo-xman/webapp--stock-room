@@ -232,3 +232,40 @@ export interface ApiErrorPayload {
   message: string;
   details?: { path: string; message: string }[];
 }
+
+// ── stuck worker claims (in_use reservations left by force-stopped runs) ──
+
+/** A sellable image (images_to_bay) currently reserved by a batch worker. */
+export interface ClaimedImage {
+  _id: string;
+  title: string;
+  in_use_at: string | null;
+  upscales: number;
+  active: boolean;
+}
+
+/** An Etsy product image currently reserved by a batch worker. */
+export interface ClaimedEtsyImage {
+  product_id: string;
+  product_title: string;
+  image_id: string | null;
+  image_index: number;
+  role: EtsyImageRole;
+  caption: string;
+  in_use_at: string | null;
+  upscales: number;
+  active: boolean;
+}
+
+export interface ClaimsSnapshot {
+  total: number;
+  images: ClaimedImage[];
+  etsy: ClaimedEtsyImage[];
+}
+
+export interface ClaimsReleaseResult {
+  source: "images" | "etsy" | "all";
+  images_released: number;
+  etsy_images_released: number;
+  total: number;
+}

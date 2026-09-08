@@ -256,7 +256,11 @@ Dans la webapp : section *Upscales* dans le détail d'une image — preview comm
 Original/×N et actions **Mark used / Download / Delete** par variante, chip `×n` sur les
 cartes, filtre « With/Without upscales ». **Statut des workers** : badges `upscaling` /
 `inactive` + chip `error` sur les cartes, bannière d'erreur avec **Dismiss**, bouton
-**Active/Paused** et filtre Status (Active / Paused (failed)) sur la page Images.
+**Active/Paused** et filtre Status (Active / Paused (failed)) sur la page Images. **Badge
+`Réservées N` dans la barre du haut** (poll 30 s) dès qu'une image est verrouillée
+`in_use` par un worker : popup listant les réservations avec leur âge et bouton
+**Tout libérer** — déverrouillage immédiat des images coincées par un workflow arrêté
+de force (`GET/POST /api/claims[/release]`), sans attendre la fenêtre stale de 30 min.
 
 Détails opérationnels : le job **réveille l'API Render** si elle est en pause (retry 5 min),
 imprime un **timer `⏱ hh:mm:ss` toutes les 5 s** pendant les phases silencieuses (chargement

@@ -165,6 +165,31 @@ Même machine, mêmes inputs, mêmes secrets que 2.1 — mais pour les images
 > `api/scripts/backfill-etsy-image-ids.cjs` répare les données existantes
 > (déjà exécuté sur la base de production le 2026-09-08).
 
+> **NB — sélection consciente du quota** : le claim Etsy réserve VRAIMENT une
+> image éligible. La ré-vérification par candidat lit le compte d'upscales
+> (la projection d'agrégation renvoie un compte, pas un tableau — les deux
+> formes sont acceptées), et la réservation atomique re-vérifie le quota
+> (`upscales.<max-1>` absent) en plus de `in_use`. Historique : la
+> ré-vérification lisait le compte projeté avec `Array.isArray()` → faux → 0,
+> donc TOUTE image d'un produit candidat semblait éligible ; les workers
+> réclamaient les premières pages déjà maxées, les ignoraient, les
+> libéraient, et les réclamaient encore — ping-pong infini (les 13 pages
+> fraîches d'un produit de 21 images n'étaient jamais prises). Corrigé +
+> testé en régression e2e.
+
+#### 2.1.2 Garde-fous anti-boucle du worker (`batch.py`, les deux lots)
+
+Même avec une API saine, le worker se protège contre toute divergence
+d'éligibilité (politique API ≠ worker) qui relancerait un ping-pong
+claim/skip :
+
+- **`--max-no-progress`** (défaut 10) : arrêt après N réclamations
+  consécutives ignorées pour quota atteint — log explicite, run vert ;
+- **répétition de la même image** : si CE worker réclame la même image plus
+  de 3 fois, il libère la réservation, journalise « boucle suspectée » et
+  s'arrête (les autres workers continuent) ;
+- le compte de no-progress est remis à zéro à chaque upscale réussi.
+
 ### 2.2 `Upscale — single image` (`.github/workflows/upscale-single.yml`)
 
 Manuel uniquement. Inputs : `source` (**image** — une image à vendre, ou
@@ -290,6 +315,19 @@ Filtres de listing ajoutés sur `GET /api/images` :
   filtre **Status** de la webapp ;
 - `in_use=true|false` — réservées par un worker / libres.
 
+**Réservations coincées (déverrouillage webapp)** :
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/api/claims` | Liste TOUTES les images réservées (`in_use: true`) des deux collections — images à vendre + images de produits Etsy — avec leur âge (`in_use_at`). Réponse `{ data: { total, images[], etsy[] } }` |
+| `POST` | `/api/claims/release` | **Déverrouillage d'urgence** — efface les réservations (uniquement `in_use` / `in_use_at`, jamais les upscales). Body : `{ source?: "images" \| "etsy" \| "all" (défaut) }`. Réponse `{ data: { images_released, etsy_images_released, total } }` — idempotent |
+
+Usage : un workflow arrêté de force (bouton *Cancel* pendant le chargement
+du modèle, runner tué) peut laisser des images verrouillées jusqu'à la fin
+de la fenêtre stale (30 min). La webapp affiche alors un badge orange
+**« Réservées N »** dans la barre du haut (poll 30 s) → popup listant les
+réservations avec leur âge → bouton **Tout libérer**.
+
 ---
 
 ## 5. Dans la webapp
@@ -321,6 +359,10 @@ Filtres de listing ajoutés sur `GET /api/images` :
     bouton **Copy** et **Dismiss** ; bouton **Active / Paused** pour
     réactiver ou mettre en pause une image ; ligne « claimed by an upscale
     worker » pendant une réservation.
+  - **barre du haut** : badge orange **`Réservées N`** (poll toutes les 30 s)
+    dès qu'une réservation `in_use` existe → popup avec la liste (âge inclus)
+    et bouton **Tout libérer** — le déverrouillage manuel des images
+    coincées par un workflow arrêté de force (sinon fenêtre stale 30 min).
 
 ---
 

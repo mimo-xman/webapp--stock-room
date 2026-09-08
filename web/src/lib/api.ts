@@ -5,7 +5,7 @@
  * A 401 kicks the user back to the gate (password changed or wrong).
  */
 
-import type { ListParams, ListResponse, Session, StockImage, Upscale, EtsyProduct, EtsyProductImage, EtsyProductMetadata, EtsyProductType, EtsyImageRole, ApiErrorPayload } from "./types";
+import type { ListParams, ListResponse, Session, StockImage, Upscale, EtsyProduct, EtsyProductImage, EtsyProductMetadata, EtsyProductType, EtsyImageRole, ApiErrorPayload, ClaimsSnapshot, ClaimsReleaseResult } from "./types";
 import { getAppPassword, clearAppPassword } from "./auth";
 
 function resolveApiUrl(): string {
@@ -160,6 +160,24 @@ export const api = {
         const ext = (upscale.url.split("?")[0].split(".").pop() || "png").toLowerCase().slice(0, 5);
         saveBlob(blob, `${filenameFrom(image, "")}_x${upscale.scale}.${ext}`);
       },
+    },
+  },
+
+  // ── stuck worker claims (in_use unlock) ──────────────────────────
+  claims: {
+    /** Every image currently reserved by a batch worker (in_use: true),
+     *  both sources — the TopBar badge feeds on this. */
+    list(): Promise<{ data: ClaimsSnapshot }> {
+      return request("/api/claims");
+    },
+
+    /** Emergency unlock — clear the reservations a force-stopped batch
+     *  left behind. Only touches in_use / in_use_at. */
+    release(source: "images" | "etsy" | "all" = "all"): Promise<{ data: ClaimsReleaseResult }> {
+      return request("/api/claims/release", {
+        method: "POST",
+        body: JSON.stringify({ source }),
+      });
     },
   },
 

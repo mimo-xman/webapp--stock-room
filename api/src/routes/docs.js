@@ -54,6 +54,8 @@ const endpointRows = [
   ['PATCH', '/api/etsy-products/:id/images/:imageId/upscales/:upscaleId', 'Mark a product-image upscale used / unused', true],
   ['DELETE', '/api/etsy-products/:id/images/:imageId/upscales/:upscaleId', 'Delete a product-image upscale (+ Cloudinary destroy when configured)', true],
   ['GET', '/api/etsy-products/:id/images/:imageId/upscales/:upscaleId/download', 'Download a product-image upscale (proxy)', true],
+  ['GET', '/api/claims', 'Currently claimed images (in_use: true) of BOTH collections — { data: { total, images[], etsy[] } }. Feeds the webapp "Réservées" badge', true],
+  ['POST', '/api/claims/release', 'EMERGENCY UNLOCK — clear the reservations a force-stopped batch left behind (in_use / in_use_at only). Body { source?: images|etsy|all } → counts', true],
   ['DELETE', '/api/etsy-products/:id', 'Delete a product', true],
 ];
 

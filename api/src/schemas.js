@@ -414,6 +414,18 @@ const etsyImageUpdateSchema = z
     message: 'provide at least one field to update',
   });
 
+// ── stuck worker claims (webapp emergency unlock) ──
+// POST /api/claims/release — clear the in_use reservations left behind by a
+// force-stopped batch run. `source` picks which reservations to clear.
+const claimReleaseSchema = z.object({
+  source: z
+    .enum(['images', 'etsy', 'all'], {
+      errorMap: () => ({ message: 'source must be one of: images, etsy, all' }),
+    })
+    .optional()
+    .default('all'),
+});
+
 module.exports = {
   verifySchema,
   sessionCreateSchema,
@@ -427,4 +439,5 @@ module.exports = {
   etsyProductUpdateSchema,
   etsyProductAddImageSchema,
   etsyImageUpdateSchema,
+  claimReleaseSchema,
 };

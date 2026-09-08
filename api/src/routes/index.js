@@ -20,11 +20,13 @@ const {
   etsyProductUpdateSchema,
   etsyProductAddImageSchema,
   etsyImageUpdateSchema,
+  claimReleaseSchema,
 } = require('../schemas');
 const authController = require('../controllers/authController');
 const sessionController = require('../controllers/sessionController');
 const imageController = require('../controllers/imageController');
 const etsyProductController = require('../controllers/etsyProductController');
+const claimController = require('../controllers/claimController');
 const docsHtml = require('./docs');
 
 const router = express.Router();
@@ -108,5 +110,10 @@ router.post('/api/etsy-products/:id/images/:imageId/upscales', validate(upscaleC
 router.patch('/api/etsy-products/:id/images/:imageId/upscales/:upscaleId', validate(upscaleUpdateSchema), etsyProductController.updateUpscale);
 router.delete('/api/etsy-products/:id/images/:imageId/upscales/:upscaleId', etsyProductController.removeUpscale);
 router.get('/api/etsy-products/:id/images/:imageId/upscales/:upscaleId/download', etsyProductController.downloadUpscale);
+
+// worker-claim visibility + emergency release — the webapp lists the images
+// a force-stopped batch left locked (in_use: true) and unlocks them at once.
+router.get('/api/claims', claimController.list);
+router.post('/api/claims/release', validate(claimReleaseSchema), claimController.release);
 
 module.exports = router;

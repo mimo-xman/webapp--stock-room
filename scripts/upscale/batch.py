@@ -109,6 +109,17 @@ def parse_args(argv):
         dest="stale_minutes",
         help="Une réservation plus vieille que X minutes est considérée morte et reprisable (défaut : 30)",
     )
+    parser.add_argument(
+        "--max-no-progress",
+        type=int,
+        default=10,
+        dest="max_no_progress",
+        help=(
+            "Arrêt de sécurité après N réclamations consécutives sans progression "
+            "(claim ignoré pour quota atteint) — protege contre une boucle infinie "
+            "claim/skip si la politique de l'API divergeait de celle du worker (défaut : 10)"
+        ),
+    )
     parser.add_argument("--cloudinary-folder", default="", help="Dossier Cloudinary (défaut : adobe-stock/upscales)")
     parser.add_argument("--model-dir", default="", help="Dossier de cache des modèles (défaut : ~/.cache/upscale-models)")
     parser.add_argument(
@@ -226,6 +237,14 @@ def main(argv=None) -> int:
     guard = ClaimGuard(api, config.stale_minutes)
     results = []
     processed = 0
+    # Safety: a skipped-for-quota claim does NOT change the image state — if
+    # the API kept returning ineligible images (policy drift, projection bug,
+    # stale aggregation…), this loop would spin forever while the workflow
+    # burns its whole 60-min timeout. Two guards break the loop:
+    #   no_progress  — N consecutive claims skipped for quota in a row;
+    #   repeat_claims — the SAME image claimed more than 3 times, ever.
+    no_progress = 0
+    claim_counts = {}  # image_id → nombre de réclamations par CE worker
 
     # ── claim loop: keep going until the API says "nothing to claim" ──
     while processed < config.max_images:
@@ -250,10 +269,29 @@ def main(argv=None) -> int:
         guard.hold(image_doc)
         log(f"→ réclamée : {title} [{image_id}] ({len(image_doc.get('upscales') or [])}/{config.max_upscales})")
 
+        claim_counts[image_id] = claim_counts.get(image_id, 0) + 1
+        if claim_counts[image_id] > 3:
+            guard.release("stopped")
+            results.append({
+                "status": "skipped",
+                "image_id": image_id,
+                "title": title,
+                "detail": (
+                    f"image réclamée {claim_counts[image_id]} fois par CE worker sans aboutir — "
+                    "boucle suspectée côté API (politique d'éligibilité incohérente), arrêt de sécurité"
+                ),
+            })
+            log(
+                f"⚠ {title} [{image_id}] réclamée {claim_counts[image_id]} fois sans aboutir — "
+                "boucle suspectée : arrêt du worker (les autres continuent)."
+            )
+            break
+
         try:
             record = process_image(config, api, upscaler, uploader, image_doc)
             results.append(record)
             processed += 1
+            no_progress = 0
             guard.release("ok")
             log(f"✅ {record['title']} → ×{record['scale']} {record['dimensions']} ({record['url']})")
         except LimitReached as e:
@@ -266,7 +304,14 @@ def main(argv=None) -> int:
                 "detail": str(e),
             })
             guard.release("stopped")
+            no_progress += 1
             log(f"⏭️  {title} — ignorée : {e}")
+            if no_progress >= max(1, args.max_no_progress):
+                log(
+                    f"⚠ {no_progress} réclamations consécutives ignorées (quota déjà atteint) — "
+                    "arrêt de sécurité du worker : l'API semble renvoyer des images non éligibles."
+                )
+                break
         except ImageSkipped as e:
             # Dead source link, empty file, image deleted meanwhile… these do
             # not heal by retrying: mark the image inactive with the reason,

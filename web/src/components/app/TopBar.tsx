@@ -6,6 +6,7 @@ import { Lock, Boxes, Images, Store, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { clearAppPassword } from "@/lib/auth";
 import { toast } from "@/hooks/use-toast";
+import { ClaimsButton } from "@/components/app/ClaimsButton";
 
 export function TopBar() {
   const pathname = usePathname();
@@ -57,6 +58,7 @@ export function TopBar() {
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
+          <ClaimsButton />
           <span className="hidden font-mono text-[11px] uppercase tracking-wider text-ink-muted md:block">
             AI asset dispatch
           </span>

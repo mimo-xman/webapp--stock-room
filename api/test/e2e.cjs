@@ -893,6 +893,59 @@ async function main() {
     ok('second pre-feature etsy image is claimable too',
       r.json.claimed === true && r.json.data.product_id === ep2);
 
+    // ── stuck worker claims: visibility + emergency release (webapp unlock) ──
+    console.log('─ claims: stuck reservations, quota-aware claim (regression), emergency release');
+    // State here: the exhaustion + pre-feature sections left 6 etsy images
+    // claimed (in_use: true, never released) and 0 images_to_bay claims.
+    r = await call('GET', '/api/claims', K);
+    ok('GET /api/claims → the 6 reservations left by the tests (both sources counted)',
+      r.status === 200 && r.json.data.total === 6 && r.json.data.etsy.length === 6 &&
+      r.json.data.images.length === 0 &&
+      r.json.data.etsy.every((c) => c.product_id && c.image_id && c.in_use_at),
+      r.json.data && { total: r.json.data.total, etsy: r.json.data.etsy.length, images: r.json.data.images.length });
+
+    r = await call('POST', '/api/claims/release', { key: API_KEY, body: { source: 'banana' } });
+    ok('claims/release with an unknown source → 400', r.status === 400 && r.json.error.code === 'VALIDATION_ERROR');
+
+    r = await call('POST', '/api/claims/release', { key: API_KEY, body: { source: 'etsy' } });
+    ok('claims/release (source: etsy) clears every etsy reservation and nothing else',
+      r.status === 200 && r.json.data.etsy_images_released === 6 &&
+      r.json.data.images_released === 0 && r.json.data.total === 6,
+      r.json.data);
+
+    r = await call('GET', '/api/claims', K);
+    ok('claims list is empty after the targeted release', r.status === 200 && r.json.data.total === 0);
+
+    r = await call('GET', `/api/etsy-products/${ep2}`, K);
+    ok('released etsy images are actually free (no in_use:true left)',
+      r.json.data.images.every((im) => im.in_use === false || im.in_use === undefined));
+
+    // ── regression: the claim must skip images already at their quota ──────
+    // The claim aggregation projects upscales as a COUNT; the per-candidate
+    // re-check once read it with Array.isArray() (a count is not an array →
+    // 0) so EVERY image of a candidate product looked eligible: workers
+    // claimed the FIRST (already maxed) pages, skipped them, released them,
+    // and re-claimed the same ones forever — the fresh pages of a 21-image
+    // product were never picked while the log looped on the same 4 pages.
+    r = await call('POST', `/api/etsy-products/${ep1}/images/${ec1}/upscales`, {
+      key: API_KEY,
+      body: { url: 'https://res.cloudinary.com/demo/quota-first_x4.png', scale: 4, model: 'RealESRGAN_x4plus', max_upscales: 1 },
+    });
+    ok('fill the quota of ep1 FIRST image (1/1) → 201', r.status === 201, r.json);
+
+    r = await call('POST', '/api/etsy-products/claim', { key: API_KEY, body: { max_upscales: 1 } });
+    ok('claim (max 1) skips the maxed FIRST image → an eligible image instead',
+      r.json.claimed === true && r.json.data.product_id === ep1 && r.json.data.image_id !== ec1 &&
+      Array.isArray(r.json.data.image.upscales) && r.json.data.image.upscales.length === 0,
+      { got: r.json.data && r.json.data.image_id, ec1 });
+    const qclaim = { pid: r.json.data.product_id, iid: r.json.data.image_id };
+    await call('POST', `/api/etsy-products/${qclaim.pid}/images/${qclaim.iid}/release`, { key: API_KEY, body: { status: 'stopped' } });
+
+    // clean pool for whatever comes next
+    r = await call('POST', '/api/claims/release', { key: API_KEY, body: {} });
+    ok('claims/release (default source all) → idempotent zeros once empty',
+      r.status === 200 && r.json.data.total === 0, r.json.data);
+
     // exhaustion: claim everything, then data:null — the batch worker's exit condition
     const claimedIds = [];
     for (;;) {
