@@ -135,11 +135,19 @@ Settings (deliberate — print product):
   - `image_link` = `result.cloudinaryUrl` (permanent — prefer it) or
     `result.image.url` + `?apiKey=[ZAZO IMAGE STUDIO API KEY]` (server file — works while the
     service is up). Use the FIRST that exists.
-- `failed` → read `job.error`: the server already retried with fresh exit IPs. If the error
-  is a **validation** error (HTTP 400 at submit), fix your request and resubmit. If it is a
-  quota/limit error (e.g. code `6101`) on every attempt, wait ~10 minutes and retry the same
-  prompt once more; if it still fails, **skip that image and continue** — then generate a
-  replacement with a new subject at the end so the piece count still reaches
+- `failed` → read `job.error`: the server already retried with fresh exit IPs. Then apply the
+  RETRY RULES — the owner's protocol for failed generations (the owner built Zazo Image Studio:
+  a failed generation is never serious, and waiting is never the answer):
+  - **Validation error** (HTTP 400 at submit) → not a retry case: fix your
+    request and resubmit.
+  - **Any other failure** — quota/limit error (e.g. code `6101`), upstream 5xx, timeout, rate
+    limit, network error → NO waiting, NO skipping, NO subject change: immediately resubmit
+    the SAME prompt, and keep resubmitting until it succeeds.
+  - **Safety valve — the ONLY wait rule:** count consecutive failed generations (every
+    success resets the count to 0). When the count reaches 10, wait 2 minutes — never more —
+    reset the count, then resume retrying. Repeat as many times as needed.
+  - A failed generation is never a reason to deviate from the plan: every piece of the plan is
+    still generated — the piece count still reaches
   @@VAR@@.
 - **Visual check:** run the STEP 4c quality checklist + regeneration
   loop on EVERY image before saving it (HARD RULE 13).

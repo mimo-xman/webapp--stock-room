@@ -277,11 +277,19 @@ Headers: X-API-Key: [ZAZO IMAGE STUDIO API KEY]
     `result.image.url` + `?apiKey=[ZAZO IMAGE STUDIO API KEY]` (server file — works while the
     service is up). Use the FIRST that exists.
   - note `result.image.sha256` for your report.
-- `failed` → read `job.error`: the server already retried with fresh exit IPs. If the error is
-  a **validation** error (HTTP 400 at submit: bad ratio/quality), fix your request and resubmit.
-  If it is a quota/limit error (e.g. code `6101`) on every attempt, wait ~10 minutes and retry
-  the same prompt once more; if it still fails, **replace the prompt with a new subject** and
-  continue — the total number of SAVED images must still match the plan.
+- `failed` → read `job.error`: the server already retried with fresh exit IPs. Then apply the
+  RETRY RULES — the owner's protocol for failed generations (the owner built Zazo Image Studio:
+  a failed generation is never serious, and waiting is never the answer):
+  - **Validation error** (HTTP 400 at submit: bad ratio/quality) → not a retry case: fix your
+    request and resubmit.
+  - **Any other failure** — quota/limit error (e.g. code `6101`), upstream 5xx, timeout, rate
+    limit, network error → NO waiting, NO skipping, NO subject change: immediately resubmit
+    the SAME prompt, and keep resubmitting until it succeeds.
+  - **Safety valve — the ONLY wait rule:** count consecutive failed generations (every
+    success resets the count to 0). When the count reaches 10, wait 2 minutes — never more —
+    reset the count, then resume retrying. Repeat as many times as needed.
+  - A failed generation is never a reason to deviate from the plan: the total number of SAVED
+    images must still match the plan.
 - **Visual check (HARD RULE 6 + GLOBAL CONTENT RULES) before saving.** Look at each image;
   reject — do not save — anything containing a living being, a face or a body part, however
   small or stylized; and when the destination is a content platform, reject anything that
@@ -372,7 +380,9 @@ Confirm `pagination.total` equals the number of images you saved and every recor
 
 - `401` → check you used the right key with the right API (each API has its own key).
 - `400 VALIDATION_ERROR` → the response lists the exact offending field; fix and resend.
-- `429` → you are rate-limited (or brute-force guard triggered): slow down / wait 10 min.
+- `429` → you are rate-limited (or brute-force guard triggered): apply the RETRY RULES —
+  resubmit immediately, never wait 10 minutes; the ONLY wait is the safety valve (10
+  consecutive failures → 2-minute pause).
 - If after all of this an API is still unusable, clone the repos and read their READMEs:
   `[ZAZO IMAGE STUDIO REPO LINK]` and `[STOCK ROOM REPO LINK]`.
 

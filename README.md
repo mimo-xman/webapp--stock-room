@@ -359,7 +359,9 @@ cd api && npm test
   (redémarrages / spin-down du free tier Render). Pour un usage intensif : configure Cloudinary
   sur Zazo Image Studio et vérifie dans ses logs Render l'absence de `cloudinary upload failed`.
 - Quota journalier easemate (code `6101`) : l'API de génération retry avec rotation d'IP Tor ;
-  si toutes les tentatives échouent, attends quelques heures (reset quotidien).
+  les prompts agent appliquent les RETRY RULES — échec de génération = nouvelle tentative
+  immédiate, jamais d'attente de 10 minutes ; seule pause autorisée : 10 échecs consécutifs
+  → 2 minutes. Un échec ne fait jamais sauter une image ni changer de sujet.
 - La webapp n'édite **pas** les sessions (par design : seul le champ *Images* est modifiable —
   marquage « used » + édition complète des métadonnées d'une image).
 
