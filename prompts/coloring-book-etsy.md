@@ -42,7 +42,14 @@ deliverable. Buyers decide with their eyes on the listing photos: those images a
 important as the book itself, they must be of the HIGHEST visual quality, and they must
 present the book accurately and attractively (what it is, what is inside, what the buyer
 gets). Never treat them as an afterthought — a great book with weak listing photos does not
-sell.
+sell. **Honesty is non-negotiable: every announcement image is generated FROM the real cover
+and the real pages** (the image API's reference-image mode — STEP 4b), so the listing photos
+show the exact book the buyer will receive — never invented pages, never a cover that does
+not exist in the deliverable. A buyer who receives something different from the listing
+photos leaves a negative review — the fastest way to kill an Etsy shop. And every image,
+deliverable or announcement, goes through the visual quality check + regeneration loop of
+STEP 4c before it is saved: a badly designed page in a paid product is a refund waiting to
+happen.
 
 A sellable coloring book is **a coherent product, not a pile of pictures**: one theme, one
 style, consistent line weight, cute child-friendly subjects, and pages that a child can
@@ -196,6 +203,11 @@ siblings is rejected and never saved, exactly like a GLOBAL CONTENT RULES violat
    correct spelling, clean typography, nothing that misrepresents the product. Generate them
    with the SAME care as the cover: distinct from each other (GLOBAL DISTINCTIVENESS RULES),
    cohesive with the book's style, and verified at the visual check like every other image.
+   The announcement images are **reference-based (STEP 4b)**: each one is generated with the
+   REAL cover and/or REAL pages of THIS book passed as source images to the generation API —
+   the pages and the cover shown in a listing photo must be the ones the buyer will actually
+   receive. An announcement image that shows an invented page, a page from another book, or
+   a cover that differs from the real cover is a REJECT — regenerate it.
 9. **Store exactly what you produced.** Every Stock Room record must reflect the real prompt,
    ratio and quality you sent, and the real URL returned. Never invent results.
 10. **Do not stop early.** The run is finished only when the cover + [NUMBER OF COLORING PAGES]
@@ -207,6 +219,14 @@ siblings is rejected and never saved, exactly like a GLOBAL CONTENT RULES violat
     no faces, no body parts (the section above) — applies to the cover, every page AND every
     announcement image, whatever the theme, the research or the demand says. A violating
     image is rejected, never saved, and replaced with a compliant one.
+13. **EVERY image is verified before it is saved — the STEP 4c check is not optional.** A
+    generated image is never "probably fine": the model sometimes produces design defects
+    (broken outlines, open shapes, detached elements, malformed subjects, cut-off
+    compositions, garbled text) that a buyer WILL notice — and review negatively. Run the
+    STEP 4c checklist on every image (cover, pages, announcement images) and apply the
+    regeneration loop (corrected prompt, up to 3 attempts, then redesign the scene) before
+    saving anything. An image that still fails after the full loop is flagged "needs manual
+    review" in the final report — never silently saved.
 
 ## STEP 1 — Research Etsy rules + what sells (web search)
 
@@ -295,12 +315,17 @@ is photo #1, generated at STEP 2.1). Plan at least FOUR more, each on a DIFFEREN
 angle, following HARD RULE 8: a "what is inside" multi-page collage, a page close-up on the
 clean line art, a "what you receive" visual (page count + cover + instant download), and a
 styled scene of the printed book in use (coloring pencils beside it — no hands, no people).
-Describe each one in one sentence now (subject, layout, short text if any) — you will build
-their prompts at STEP 2.4 and generate them at STEP 4 after the pages.
+For each planned promo, ALSO note its **reference set**: which real images (the cover and/or
+which pages — 1 to 5 references per generation) it will be built from at STEP 4b. Spread the
+pages across the promos (different promos showcase different pages — a buyer scrolling the
+listing sees more of the book). Describe each one in one sentence now (subject, layout,
+reference set, short text if any) — you will build their prompts at STEP 2.4 and generate
+them at STEP 4b from the real saved images.
 
 **2.4 — Per-image generation prompt.** Build every page's prompt with the line-art formula
-from APPENDIX C (subject swapped in). Build the cover prompt with the cover formula. Build
-every announcement image's prompt with the announcement formula.
+from APPENDIX D (subject swapped in). Build the cover prompt with the cover formula. Build
+every announcement image's prompt with the announcement formula (image-to-image version —
+it goes with the reference set you planned at 2.3).
 
 ## STEP 3 — Create your session (Stock Room API)
 
@@ -315,8 +340,11 @@ Body: { "title": "Etsy coloring book — <the theme you picked at STEP 1b> — <
 
 ## STEP 4 — Generate the images (Zazo Image Studio API)
 
-Generate in this order: **cover first**, then pages 1 → N, **then the announcement images**.
+Generate in this order: **cover first**, then pages 1 → N, **then the announcement images
+(STEP 4b — image-to-image, with the real cover and pages as references)**.
 For each, use the **async** flow (do NOT use `wait: true`):
+
+### 4a — Cover and coloring pages (text-to-image)
 
 ```
 POST [ZAZO IMAGE STUDIO API LINK]/generate
@@ -358,26 +386,131 @@ Settings (deliberate — print product):
   prompt once more; if it still fails, **skip that page and continue** — then generate a
   replacement page with a new subject at the end so the page count still reaches
   [NUMBER OF COLORING PAGES].
-- **Visual check (MANDATORY before saving) — cover:** colorful, theme clear, title text
-  readable and correctly spelled, child-friendly, no living beings, no faces, no body parts
-  (GLOBAL CONTENT RULES — an anthropomorphic hero subject is a REJECT), no watermark.
-  **— each page:** pure black
-  outlines on pure white (HARD RULE 1), no gray, no color, closed colorable shapes, cute
-  child-safe NON-LIVING subject (HARD RULE 2 + GLOBAL CONTENT RULES — zero living beings,
-  zero faces, zero body parts), no text, no franchise characters (HARD RULE 3), style
-  consistent with the rest of the book (HARD RULE 6), and NOT a lookalike of another page of
-  this same book (HARD RULE 4 + GLOBAL DISTINCTIVENESS RULES 4: same subject or same
-  composition as a previously saved page → reject it and redesign the scene). **— each
-  announcement image:** highest-quality marketing visual (HARD RULE 8) — polished, readable
-  text if any (correct spelling!), presents the book accurately, visually distinct from the
-  other announcement images, cohesive with the book's style, and compliant with the GLOBAL
-  CONTENT RULES (no people, no hands holding the book, no faces — reject and regenerate
-  otherwise). Reject any image that fails ANY of
-  these — do not save it, do not count it; fix the prompt (e.g. add `no shading, no gray
-  tones, no color fills, no animals, no people, no faces, no body parts`) and generate a
-  replacement. If your runtime truly cannot view
-  images, say so in the final report and enforce the strongest textual exclusions instead.
+- **Visual check — cover and pages:** run the STEP 4c quality checklist + regeneration
+  loop on EVERY image before saving it (HARD RULE 13).
 - Generate sequentially (one job at a time) — the queue is serialized server-side anyway.
+
+### 4b — Announcement images: image-to-image with the REAL cover and pages (MANDATORY)
+
+The announcement images must present the book the buyer will actually receive. Generating
+them from text alone lets the model INVENT pages and covers — the buyer would be shown a
+book that does not exist. Every announcement image is therefore generated in
+**image-to-image mode**: you pass the real cover and/or real pages of THIS book as
+reference images, and the prompt becomes the presentation instruction for them.
+
+The generation API accepts `images` — an array of **1 to 5 reference images** — in the
+`POST /generate` body (each entry: a public http(s) URL). Pass the **Cloudinary URLs** of
+the images you already saved (`result.cloudinaryUrl` — the same value you stored as
+`image_link` in the Stock Room at STEP 5). Example — the "what is inside" collage:
+
+```
+POST [ZAZO IMAGE STUDIO API LINK]/generate
+Headers: X-API-Key: [ZAZO IMAGE STUDIO API KEY]
+Body: {
+  "prompt": "<announcement instruction — APPENDIX D formula>",
+  "images": [
+    "<cover cloudinaryUrl>",
+    "<page 3 cloudinaryUrl>",
+    "<page 7 cloudinaryUrl>",
+    "<page 12 cloudinaryUrl>",
+    "<page 18 cloudinaryUrl>"
+  ],
+  "aspectRatio": "3:4",
+  "quality": "2K",
+  "fileType": "png"
+}
+→ 202 { "jobId": "<id>", "statusUrl": "…/jobs/<id>" }
+```
+
+Everything else is identical to the pages: async job, polling every 3–5 s, the same
+settings (`3:4` — or `1:1` for the collage if its layout needs a square — quality `2K`,
+fileType `png`), the same failure handling. After the job succeeds, check `job.params.mode`
+is `image-to-image` and `job.params.sourceImageCount` equals the number of references you
+passed (the job response exposes both) — if the mode shows `text-to-image`, you forgot the
+`images` array: resubmit with it.
+
+**Reference selection rules (deliberate):**
+
+- **Never exceed 5 references per generation** — the API rejects the request otherwise.
+- **Promo 1 (styled cover shot):** the cover alone as reference.
+- **"What is inside" collage:** up to 5 references — the cover + a representative sample of
+  pages (mix simple / medium / detailed, different subjects). Every page visible in the
+  collage must be one of the references.
+- **Page close-up:** ONE reference — the exact page it zooms on.
+- **"What you receive" visual:** the cover + 1–2 pages.
+- **Styled scene in use:** the cover (optionally + one page lying beside it).
+- **Spread the pages across the promos** (your STEP 2.3 reference sets) — different promos
+  showcase different pages.
+- In image-to-image mode the **prompt is a presentation instruction for the provided
+  images** ("arrange the provided coloring book pages in a flat-lay collage on a warm wooden
+  table…"), not a free description. Build it from the announcement formula in APPENDIX D,
+  which is written for reference mode.
+- **Fallback:** if image-to-image fails repeatedly for a promo (validation error or upstream
+  failure after the documented retries), you may fall back to text-to-image for that ONE
+  promo — but then the STEP 4c check must verify character-by-character that every page and
+  the cover shown match the real ones exactly, and you must report the fallback in the
+  final report. Never fall back silently.
+
+### 4c — Visual quality check and regeneration loop (EVERY image — no exception)
+
+View each generated image at **full size** (not a thumbnail) BEFORE saving it, and run this
+checklist. The model sometimes produces images with design defects that no prompt can fully
+prevent but a buyer will spot instantly — your check is the only barrier between a defect
+and a paying customer. A botched page in a sold book = a negative review.
+
+**Reject an image if it shows ANY of these defects:**
+
+- **Broken line work** (pages): interrupted or doubled outlines, shaky or fuzzy strokes,
+  half-erased construction lines, sketch-like scribbles.
+- **Open or leaking shapes** (pages): colorable shapes not fully closed (a child's color
+  would spill out), shapes bleeding into each other, floating detached elements (a wheel
+  not touching its vehicle, a roof hovering over its house, a handle floating in the air).
+- **Malformed subject**: distorted geometry (warped wheels, twisted perspective, asymmetric
+  body), impossible structure, unrecognizable subject, a machine/building/object that does
+  not look like what its caption says.
+- **Bad composition**: subject cut off at an edge, cluttered overlapping elements, an empty
+  half-page, an unbalanced layout, the subject too small to color.
+- **Unclean render** (pages): gray tones, shading, gradients, color fills, patches, smudges,
+  noise, compression artifacts.
+- **Cover-specific**: garbled or misspelled title text, unreadable typography, wrong mood
+  (not cheerful), not print-ready, watermark, signature, anthropomorphic hero subject
+  (GLOBAL CONTENT RULES — a REJECT).
+- **Forbidden content** (every image): living beings, faces, body parts, franchise
+  characters, text/letters/numbers on pages (HARD RULES 1–3, 7 + GLOBAL CONTENT RULES).
+- **Book coherence** (pages): style inconsistent with the rest of the book (HARD RULE 6),
+  or a lookalike of another page of this same book (HARD RULE 4 + GLOBAL DISTINCTIVENESS
+  RULES 4 — same subject or same composition as a previously saved page → REJECT and
+  redesign the scene).
+- **Announcement-specific** (HARD RULE 8): a page or the cover that does NOT match the
+  reference images you passed (an invented page = REJECT), garbled or misspelled marketing
+  text, blurry low-detail render, anything that misrepresents the product, hands or people
+  holding the book (GLOBAL CONTENT RULES).
+
+**Regeneration loop (mandatory):**
+
+1. **Attempt 1 fails → regenerate with a corrected prompt.** Keep the base formula, APPEND a
+   short `Fix:` clause naming the exact defect and the correction, e.g. `Fix: the front
+   wheels were detached from the body — draw one solid continuous outline, every part
+   physically attached to the vehicle, no floating elements.` One defect = one targeted fix
+   (do not rewrite the whole prompt, do not change the subject).
+2. **Attempt 2 fails → regenerate with the accumulated fix clause** (name BOTH defects) and
+   tighten the style constraints, e.g. append `extremely clean vector-like line art,
+   uniform stroke weight, generous white space.`
+3. **Attempt 3 fails → redesign the scene.** Same subject, DIFFERENT composition or angle
+   (side view → three-quarter view; close-up → full scene with ground and sky; one object
+   → two objects interacting). A prompt that failed three times will fail a fourth.
+4. **Hard ceiling: 3 regeneration attempts per image** (4 generations total). If the image
+   STILL fails: keep the best attempt, do NOT count an announcement image that misrepresents
+   the book (that one is never saved), and flag the image clearly in the final report as
+   "needs manual review" with the defect list — the owner decides. Never silently save a
+   defective image.
+5. **Log every rejection** as you go: role/caption, attempt #, defect found, fix applied.
+   STEP 6 requires this QC report.
+
+If your runtime truly cannot view images, say so in the final report, enforce the strongest
+textual exclusions in every prompt, and rely on the reference-based mode (STEP 4b) as the
+accuracy guarantee for the announcement images — with the real pages passed as references,
+the model cannot invent a different book.
 
 ## STEP 5 — Register the PRODUCT with its images (Stock Room API)
 
@@ -435,7 +568,8 @@ Body: {
 
 For the ANNOUNCEMENT images, use `"role": "marketing"` and the caption convention
 `"<Book title> — Promo <M>: <angle>"` (e.g. `"Busy Machines Coloring Book — Promo 2: what
-is inside — 6 of the 20 pages"`). `role` accepts: `cover`, `page`, `asset`, `preview`,
+is inside — 4 of the 20 pages"` — the number of pages shown never exceeds the number of
+references you passed, max 5). `role` accepts: `cover`, `page`, `asset`, `preview`,
 `marketing` — the announcement images MUST use `marketing` so the webapp and the upscale
 batches treat them as listing photos, distinct from the deliverable pages.
 
@@ -488,12 +622,17 @@ description, tags, category, price). Then output a final report:
 - the announcement images: list them (angle, caption) — they are ready to upload as the
   Etsy listing photos, in order (cover shot first)
 - ordered table: page # / subject / caption / image_link (cover first)
-- ordered table: promo # / angle / caption / image_link
+- ordered table: promo # / angle / reference set (which real cover/pages) / caption /
+  image_link
 - generation stats: attempts, durations, any replaced or skipped pages and why
-- quality control: every image rejected at the visual check and the exact reason (living
-  being, face, body part — GLOBAL CONTENT RULES; gray
-  tones, open shapes, franchise character, scary subject, garbled text on cover…; lookalike
-  page — HARD RULE 4 / GLOBAL DISTINCTIVENESS RULES)
+- quality control: every image rejected at the STEP 4c check, the exact defect and the fix
+  applied at each attempt (living being, face, body part — GLOBAL CONTENT RULES; gray tones,
+  open shapes, broken line work, detached floating elements, malformed subject, cut-off
+  composition, franchise character, scary subject, garbled text on cover…; lookalike page —
+  HARD RULE 4 / GLOBAL DISTINCTIVENESS RULES; announcement image showing a page or cover
+  that does not match its references — HARD RULE 8); how many regenerations each image
+  needed; any image flagged "needs manual review" after the full loop; any promo that fell
+  back to text-to-image (and why)
 - distinctiveness: what makes THIS book different from the current Etsy competition for its
   theme (the angle and style decisions, with the saturation evidence you found at STEP 1b),
   and how the pages differ from each other
@@ -527,7 +666,11 @@ Auth: header `X-API-Key: [ZAZO IMAGE STUDIO API KEY]` (or query `?apiKey=` for f
 `aspectRatio` `Auto|1:1|16:9|9:16|4:3|3:4|3:2|2:3|2:1|1:2|3:1|1:3|21:9|9:21` ·
 `fileType` `png|jpg|webp` · `wait` (bool, sync mode — avoid) · `count` (int 1–20 — submit
 several jobs with the same prompt at once; useful to produce several candidate covers, keep
-the best one, and cancel the rest).
+the best one, and cancel the rest) · **`images` (array of 1–5 reference image URLs — puts
+the job in image-to-image mode, where the model builds the output FROM the provided images
+and the prompt becomes the presentation instruction; the job response confirms it with
+`params.mode: "image-to-image"` + `params.sourceImageCount`. This is how the announcement
+images are generated — STEP 4b).**
 
 Job result fields you care about: `result.cloudinaryUrl`, `result.image.url`,
 `result.image.sha256`, `job.attempts[]`.
@@ -595,20 +738,24 @@ no watermark, no
 signature, no brand logos.
 ```
 
-**Announcement image (swap `<book title>`, `<selling angle>` and `<page count>` — the visuals
-that SELL the book on the Etsy listing; each one uses a DIFFERENT angle):
+**Announcement image (image-to-image — swap `<book title>`, `<selling angle>` and `<page
+count>`; ALWAYS send together with the real images as the `images` reference array, 1 to 5
+URLs — STEP 4b; each promo uses a DIFFERENT angle):
 
 ```
 Professional marketing visual for an Etsy listing, presenting the printable coloring book
-"<book title>". <selling angle — e.g. "flat-lay collage of six coloring pages fanned out on
-a warm wooden table with coloring pencils beside them" / "close-up of one finished line-art
-page showing the bold clean outlines and generous white space" / "the book cover presented
-like a printed product, slightly angled on a soft neutral background with a subtle shadow">.
-Clean modern layout, crisp readable short text "<book title> — <page count> printable pages
-— instant download" in a friendly rounded font, high-resolution product-photography quality,
-bright inviting colors matching the book's cover palette, portrait format. No people, no
-animals, no living beings, no faces, no facial features, no body parts, no hands, no
-watermark, no brand logos, no misspelled text.
+"<book title>". Build it FROM the provided reference images — they are the real cover and
+the real pages of this book. <selling angle — e.g. "arrange the provided coloring pages in
+a flat-lay collage fanned out on a warm wooden table with coloring pencils beside them" /
+"close-up of the provided line-art page, showing its bold clean outlines and generous white
+space" / "present the provided cover like a printed product, slightly angled on a soft
+neutral background with a subtle shadow">. Reproduce the referenced pages and cover
+faithfully — same drawings, same line art, same title text; do not redraw, redesign or
+invent pages. Clean modern layout, crisp readable short text "<book title> — <page count>
+printable pages — instant download" in a friendly rounded font, high-resolution
+product-photography quality, bright inviting colors matching the book's cover palette,
+portrait format. No people, no animals, no living beings, no faces, no facial features, no
+body parts, no hands, no watermark, no brand logos, no misspelled text.
 ```
 
 ## APPENDIX E — LYRA (prompt engineering standard — follow verbatim)
