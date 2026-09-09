@@ -20,7 +20,7 @@ function createApp() {
       origin: CONFIG.CORS_ORIGINS.includes('*') ? true : CONFIG.CORS_ORIGINS,
       methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Accept', 'Origin', 'X-API-Key', 'X-App-Password'],
-      exposedHeaders: ['Content-Disposition'],
+      exposedHeaders: ['Content-Disposition', 'X-Zip-Files', 'X-Zip-Failed'],
       maxAge: 600,
     })
   );

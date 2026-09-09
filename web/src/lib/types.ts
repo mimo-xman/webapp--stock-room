@@ -233,6 +233,17 @@ export interface ApiErrorPayload {
   details?: { path: string; message: string }[];
 }
 
+// ── bulk mark-as-used (webapp checkbox multi-selection) ─────────────────────
+
+/** POST /api/images/bulk-used result — `marked` items were stamped; the
+ *  updated image docs (for in-place grid patches) and any targets that no
+ *  longer exist. */
+export interface BulkUsedResult {
+  marked: number;
+  images: StockImage[];
+  missing: { image_id: string; upscale_id?: string }[];
+}
+
 // ── stuck worker claims (in_use reservations left by force-stopped runs) ──
 
 /** A sellable image (images_to_bay) currently reserved by a batch worker. */

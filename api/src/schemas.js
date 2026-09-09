@@ -224,6 +224,34 @@ const imageUpdateSchema = z
     message: 'provide at least one field to update',
   });
 
+// ── bulk mark-as-used (webapp multi-selection) ─────────────────────────────
+// POST /api/images/bulk-used — stamp many images / upscale variants in ONE
+// request. `used: true` marks Adobe Stock (the primary, like the webapp's
+// single-image stamp); `used: false` clears every platform.
+const BULK_USED_MAX = 200;
+
+const imageBulkUsedSchema = z
+  .object({
+    used: z.boolean(),
+    image_ids: z
+      .array(objectId)
+      .max(BULK_USED_MAX, `at most ${BULK_USED_MAX} images per bulk update`)
+      .optional(),
+    upscales: z
+      .array(
+        z.object({
+          image_id: objectId,
+          upscale_id: objectId,
+        })
+      )
+      .max(BULK_USED_MAX, `at most ${BULK_USED_MAX} upscales per bulk update`)
+      .optional(),
+  })
+  .refine(
+    (obj) => (obj.image_ids?.length ?? 0) + (obj.upscales?.length ?? 0) > 0,
+    { message: 'provide at least one image_id or upscale target' }
+  );
+
 // ── parallel batch workers (claim / release) ──
 // POST /api/images/claim — a batch worker atomically reserves the oldest
 // eligible image (upscales < max_upscales, active, not already claimed —
@@ -431,6 +459,7 @@ module.exports = {
   sessionCreateSchema,
   imageCreateSchema,
   imageUpdateSchema,
+  imageBulkUsedSchema,
   imageClaimSchema,
   imageReleaseSchema,
   upscaleCreateSchema,

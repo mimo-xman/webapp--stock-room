@@ -12,6 +12,7 @@ const {
   sessionCreateSchema,
   imageCreateSchema,
   imageUpdateSchema,
+  imageBulkUsedSchema,
   imageClaimSchema,
   imageReleaseSchema,
   upscaleCreateSchema,
@@ -67,12 +68,14 @@ router.delete('/api/sessions/:id', sessionController.remove);
 // images (multi-platform: collection images_to_bay, per-platform metadata)
 router.get('/api/images', imageController.list);
 router.post('/api/images', validate(imageCreateSchema), imageController.create);
-// NOTE: /api/images/all and /api/images/claim MUST stay ABOVE
-// /api/images/:id — Express matches routes in declaration order and 'all' /
-// 'claim' would otherwise be treated as an id.
+// NOTE: /api/images/all, /api/images/claim and /api/images/bulk-used MUST
+// stay ABOVE /api/images/:id — Express matches routes in declaration order
+// and 'all' / 'claim' / 'bulk-used' would otherwise be treated as an id.
 router.get('/api/images/all', imageController.listAll);
 // Parallel batch workers: atomically reserve the oldest eligible image.
 router.post('/api/images/claim', validate(imageClaimSchema), imageController.claim);
+// Webapp multi-selection: stamp many images / upscale variants at once.
+router.post('/api/images/bulk-used', validate(imageBulkUsedSchema), imageController.bulkUsed);
 router.get('/api/images/:id', imageController.getOne);
 router.patch('/api/images/:id', validate(imageUpdateSchema), imageController.update);
 router.post('/api/images/:id/release', validate(imageReleaseSchema), imageController.release);
@@ -93,6 +96,9 @@ router.post('/api/etsy-products', validate(etsyProductCreateSchema), etsyProduct
 // 'claim' would otherwise be treated as an id.
 // Parallel batch workers: atomically reserve the oldest eligible PRODUCT IMAGE.
 router.post('/api/etsy-products/claim', validate(imageClaimSchema), etsyProductController.claim);
+// Whole-product ZIP (origin / x2 / x4 / metadata — nothing default) — must
+// stay ABOVE the /api/etsy-products/:id/images/... downloads too.
+router.get('/api/etsy-products/:id/download-zip', etsyProductController.downloadZip);
 router.get('/api/etsy-products/:id', etsyProductController.getOne);
 router.patch('/api/etsy-products/:id', validate(etsyProductUpdateSchema), etsyProductController.update);
 router.post('/api/etsy-products/:id/images', validate(etsyProductAddImageSchema), etsyProductController.addImage);

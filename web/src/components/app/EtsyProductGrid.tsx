@@ -8,7 +8,7 @@
  * product — plus price and tag count.
  */
 
-import { Images, Tag, Layers, Megaphone } from "lucide-react";
+import { FileArchive, Images, Tag, Layers, Megaphone } from "lucide-react";
 import { ETSY_PRODUCT_TYPES } from "@/lib/constants";
 import type { EtsyProduct } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -17,10 +17,13 @@ export function EtsyProductGrid({
   products,
   loading = false,
   onOpen,
+  onDownloadZip,
 }: {
   products: EtsyProduct[];
   loading?: boolean;
   onOpen?: (product: EtsyProduct) => void;
+  /** Opens the "Download all as ZIP" popup (origin / x2 / x4 / metadata). */
+  onDownloadZip?: (product: EtsyProduct) => void;
 }) {
   if (loading) {
     return (
@@ -77,6 +80,21 @@ export function EtsyProductGrid({
                 <span className="stamp pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[11px]">
                   Listed
                 </span>
+              )}
+              {onDownloadZip && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDownloadZip(p);
+                  }}
+                  aria-label={`Download all images of ${p.metadata.title} as ZIP`}
+                  title="Download all as ZIP (originals, upscales, metadata)"
+                  className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center border border-line-strong bg-surface/90 text-ink transition-all hover:border-ink hover:text-brand focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-brand max-md:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                  data-testid="download-zip-trigger"
+                >
+                  <FileArchive className="h-4 w-4" aria-hidden />
+                </button>
               )}
             </div>
             <div className="flex flex-1 flex-col gap-2 p-3">

@@ -46,6 +46,7 @@ authentications per IP are counted and blocked (brute-force guard).
 | GET | `/api/images/all` | **every image in one call** — agent dedup check before generating a new batch (lean fields; `?with_links=1` adds `image_link` + `upscales`; newest first, capped at 5000 with `truncated` flag) | ✔ |
 | POST | `/api/images` | register an image (full metadata, validated) | ✔ |
 | POST | `/api/images/claim` | **parallel batch worker** — atomically reserve the oldest eligible image (upscales < `max_upscales`, active, not in use — or claim older than `stale_minutes`, default 30). Body `{ max_upscales?, stale_minutes? }` → `{ data: image \| null, claimed }`; `data: null` = nothing left, the worker stops | ✔ |
+| POST | `/api/images/bulk-used` | **webapp multi-selection** — stamp many images and/or upscale variants in ONE request. Body `{ used: true\|false, image_ids?: [], upscales?: [{ image_id, upscale_id }] }` (max 200 each) → `{ data: { marked, images[], missing[] } }`; `used: true` marks Adobe Stock, `used: false` clears every platform | ✔ |
 | POST | `/api/images/:id/release` | batch worker reports the attempt outcome — `{ status: ok \| stopped \| error, error_message? }`: `ok` clears the error, `stopped` only frees the claim, `error` pauses the image (`active: false`) + records `error_message` | ✔ |
 | GET | `/api/images/:id` | one image (incl. its `upscales[]`) | ✔ |
 | PATCH | `/api/images/:id` | edit any metadata field(s) (e.g. `used_in_adobe_stock`, `active`, `error_message`) | ✔ |
@@ -59,6 +60,11 @@ authentications per IP are counted and blocked (brute-force guard).
 Sessions are intentionally **not editable** — the product lets the owner modify images only.
 Upscales are appended by the GitHub Actions Real-ESRGAN job (see `docs/UPSCALE.md`) and managed
 from the webapp; the server enforces a hard cap (`MAX_UPSCALES_PER_IMAGE`, default 10).
+
+The Etsy product endpoints (products, nested images, per-image upscales, per-image downloads
+and the whole-product `GET /api/etsy-products/:id/download-zip?origin=1&x2=1&x4=1&metadata=1`
+streamed ZIP with `metadata.txt` + `_download-report.txt`) are listed on the API root page
+(`GET /`) served by this service.
 
 ## Response envelope
 

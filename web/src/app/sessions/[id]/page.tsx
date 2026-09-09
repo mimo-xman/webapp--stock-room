@@ -34,6 +34,8 @@ import { formatDateTime } from "@/lib/format";
 import { IMAGE_SORTS } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { SelectionBar } from "@/components/app/SelectionBar";
+import { BulkSelectPanel } from "@/components/app/BulkSelectPanel";
+import { EtsyZipDialog } from "@/components/app/EtsyZipDialog";
 import { CsvPlatformDialog } from "@/components/app/CsvPlatformDialog";
 import type { Session, StockImage, EtsyProduct } from "@/lib/types";
 
@@ -67,6 +69,9 @@ export default function SessionDetailPage() {
   const [productFormOpen, setProductFormOpen] = useState(false);
   const [confirmDeleteSession, setConfirmDeleteSession] = useState(false);
   const [thunk, setThunk] = useState(0);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [zipProduct, setZipProduct] = useState<EtsyProduct | null>(null);
+  const [zipDialogOpen, setZipDialogOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -172,6 +177,45 @@ export default function SessionDetailPage() {
    *  (originals and/or upscaled variants — selection survives pagination). */
   function downloadCsv() {
     setCsvDialogOpen(true);
+  }
+
+  /** Bulk "Mark as used" for the checkbox multi-selection: originals stamp
+   *  their image (Adobe Stock, the primary), upscales stamp their variant —
+   *  ONE request for the whole selection, rows patched in place, selection
+   *  cleared when the stamp lands. */
+  async function bulkMarkUsed() {
+    const items = csvSel.list;
+    if (items.length === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    const image_ids = items.filter((it) => !it.upscale).map((it) => it.image._id);
+    const upscales = items
+      .filter((it) => it.upscale)
+      .map((it) => ({ image_id: it.image._id, upscale_id: it.upscale!._id }));
+    try {
+      const res = await api.images.bulkUsed({ used: true, image_ids, upscales });
+      for (const doc of res.data.images) {
+        list.patchLocal(doc._id, {
+          used: doc.used,
+          used_count: doc.used_count,
+          used_in_adobe_stock: doc.used_in_adobe_stock,
+          upscales: doc.upscales,
+        });
+      }
+      setThunk((t) => t + 1);
+      refreshSessionHeader(); // the header shows the session's usedCount
+      toast({
+        title: "Marked as used",
+        description: `${res.data.marked} asset${res.data.marked === 1 ? "" : "s"} stamped in one click — the selection was cleared.${
+          res.data.missing.length > 0 ? ` ${res.data.missing.length} target(s) no longer exist and were skipped.` : ""
+        }`,
+      });
+      csvSel.clear();
+    } catch (e: unknown) {
+      const msg = (e as { payload?: { message?: string } })?.payload?.message || "The bulk stamp was not applied.";
+      toast({ variant: "destructive", title: "Bulk update failed", description: msg });
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   async function deleteSession() {
@@ -282,6 +326,15 @@ export default function SessionDetailPage() {
             hideSearch={false}
           />
 
+          {!list.loading && images.length > 0 && (
+            <BulkSelectPanel
+              images={images}
+              page={list.params.page}
+              onApply={(categories, mode) => csvSel.bulkApply(images, categories, mode)}
+              onClearAll={csvSel.clear}
+            />
+          )}
+
           {list.error && (
             <p className="border border-danger bg-danger-soft px-4 py-3 text-sm text-danger" role="alert">{list.error}</p>
           )}
@@ -333,6 +386,8 @@ export default function SessionDetailPage() {
 
         <SelectionBar
           count={csvSel.count}
+          marking={bulkBusy}
+          onMarkUsed={bulkMarkUsed}
           onDownload={downloadCsv}
           onClear={csvSel.clear}
         />
@@ -391,7 +446,14 @@ export default function SessionDetailPage() {
               }
             />
           ) : (
-            <EtsyProductGrid products={products} onOpen={openProductDetail} />
+            <EtsyProductGrid
+              products={products}
+              onOpen={openProductDetail}
+              onDownloadZip={(p) => {
+                setZipProduct(p);
+                setZipDialogOpen(true);
+              }}
+            />
           )}
 
           <PaginationBar pagination={productList.pagination} onChange={productList.updateParams} />
@@ -403,6 +465,8 @@ export default function SessionDetailPage() {
         onOpenChange={setCsvDialogOpen}
         items={csvSel.list}
       />
+
+      <EtsyZipDialog product={zipProduct} open={zipDialogOpen} onOpenChange={setZipDialogOpen} />
 
       {/* ── image detail (specific to Images to buy) ── */}
       <ImageDetailDialog

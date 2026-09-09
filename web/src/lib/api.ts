@@ -5,7 +5,7 @@
  * A 401 kicks the user back to the gate (password changed or wrong).
  */
 
-import type { ListParams, ListResponse, Session, StockImage, Upscale, EtsyProduct, EtsyProductImage, EtsyProductMetadata, EtsyProductType, EtsyImageRole, ApiErrorPayload, ClaimsSnapshot, ClaimsReleaseResult } from "./types";
+import type { ListParams, ListResponse, Session, StockImage, Upscale, EtsyProduct, EtsyProductImage, EtsyProductMetadata, EtsyProductType, EtsyImageRole, ApiErrorPayload, ClaimsSnapshot, ClaimsReleaseResult, BulkUsedResult } from "./types";
 import { getAppPassword, clearAppPassword } from "./auth";
 
 function resolveApiUrl(): string {
@@ -118,6 +118,15 @@ export const api = {
     remove(id: string): Promise<{ data: { deleted: boolean } }> {
       return request(`/api/images/${id}`, { method: "DELETE" });
     },
+    /** Bulk "Mark as used" stamp for the checkbox multi-selection — ONE
+     *  request for many images and/or upscale variants. */
+    bulkUsed(payload: {
+      used: boolean;
+      image_ids?: string[];
+      upscales?: { image_id: string; upscale_id: string }[];
+    }): Promise<{ data: BulkUsedResult }> {
+      return request("/api/images/bulk-used", { method: "POST", body: JSON.stringify(payload) });
+    },
     /** Download via the server proxy (avoids CORS / dead-link issues). */
     async download(image: StockImage): Promise<void> {
       const password = getAppPassword();
@@ -205,6 +214,32 @@ export const api = {
     remove(id: string): Promise<{ data: { deleted: boolean } }> {
       return request(`/api/etsy-products/${id}`, { method: "DELETE" });
     },
+    /** Whole product as ONE streamed ZIP (server-side build). Nothing is
+     *  included by default — exactly the checked categories. Returns the
+     *  planned file count from the X-Zip-Files header. */
+    async downloadZip(
+      product: EtsyProduct,
+      opts: { origin: boolean; x2: boolean; x4: boolean; metadata: boolean },
+    ): Promise<{ files: number }> {
+      const password = getAppPassword();
+      const q = new URLSearchParams();
+      if (opts.origin) q.set("origin", "1");
+      if (opts.x2) q.set("x2", "1");
+      if (opts.x4) q.set("x4", "1");
+      if (opts.metadata) q.set("metadata", "1");
+      const res = await fetch(
+        `${API_URL}/api/etsy-products/${product._id}/download-zip?${q.toString()}`,
+        { headers: password ? { "X-App-Password": password } : {} },
+      );
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new ApiError(res.status, (json && json.error) || undefined);
+      }
+      const blob = await res.blob();
+      saveBlob(blob, `${slugText(product.metadata?.title)}.zip`);
+      const files = Number.parseInt(res.headers.get("X-Zip-Files") || "", 10);
+      return { files: Number.isFinite(files) ? files : 0 };
+    },
     addImage(id: string, image: Partial<EtsyProductImage>): Promise<{ data: EtsyProduct }> {
       return request(`/api/etsy-products/${id}/images`, { method: "POST", body: JSON.stringify(image) });
     },
@@ -282,18 +317,21 @@ export const api = {
   },
 };
 
+/** Lowercase filename-safe slug shared by the product downloads. */
+function slugText(s: string): string {
+  return (s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50) || "image";
+}
+
 /** Download filename base for an Etsy product image (no extension). */
 function slugProductFile(product: EtsyProduct, image: EtsyProductImage, index: number): string {
-  const slug = (s: string) =>
-    (s || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 50) || "image";
   const caption = image.caption?.trim() || `image-${index + 1}`;
-  return `${slug(product.metadata?.title)}-${slug(caption)}`;
+  return `${slugText(product.metadata?.title)}-${slugText(caption)}`;
 }
 
 function saveBlob(blob: Blob, filename: string): void {

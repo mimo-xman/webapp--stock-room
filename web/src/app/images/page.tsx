@@ -20,6 +20,7 @@ import { api } from "@/lib/api";
 import { IMAGE_SORTS, CATEGORIES, QUALITIES } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { SelectionBar } from "@/components/app/SelectionBar";
+import { BulkSelectPanel } from "@/components/app/BulkSelectPanel";
 import type { StockImage } from "@/lib/types";
 
 export default function ImagesPage() {
@@ -33,6 +34,7 @@ export default function ImagesPage() {
   const [editing, setEditing] = useState<StockImage | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [thunk, setThunk] = useState(0);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const images = list.items as StockImage[];
 
@@ -131,6 +133,44 @@ export default function ImagesPage() {
     setCsvDialogOpen(true);
   }
 
+  /** Bulk "Mark as used" for the checkbox multi-selection: originals stamp
+   *  their image (Adobe Stock, the primary), upscales stamp their variant —
+   *  ONE request for the whole selection, rows patched in place, selection
+   *  cleared when the stamp lands. */
+  async function bulkMarkUsed() {
+    const items = csvSel.list;
+    if (items.length === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    const image_ids = items.filter((it) => !it.upscale).map((it) => it.image._id);
+    const upscales = items
+      .filter((it) => it.upscale)
+      .map((it) => ({ image_id: it.image._id, upscale_id: it.upscale!._id }));
+    try {
+      const res = await api.images.bulkUsed({ used: true, image_ids, upscales });
+      for (const doc of res.data.images) {
+        list.patchLocal(doc._id, {
+          used: doc.used,
+          used_count: doc.used_count,
+          used_in_adobe_stock: doc.used_in_adobe_stock,
+          upscales: doc.upscales,
+        });
+      }
+      setThunk((t) => t + 1);
+      toast({
+        title: "Marked as used",
+        description: `${res.data.marked} asset${res.data.marked === 1 ? "" : "s"} stamped in one click — the selection was cleared.${
+          res.data.missing.length > 0 ? ` ${res.data.missing.length} target(s) no longer exist and were skipped.` : ""
+        }`,
+      });
+      csvSel.clear();
+    } catch (e: unknown) {
+      const msg = (e as { payload?: { message?: string } })?.payload?.message || "The bulk stamp was not applied.";
+      toast({ variant: "destructive", title: "Bulk update failed", description: msg });
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   const hasFilters = list.params.search || Object.values(list.params.filters).some(Boolean);
 
   return (
@@ -166,6 +206,15 @@ export default function ImagesPage() {
           filters={filterDefs}
           sortOptions={IMAGE_SORTS}
         />
+
+        {!list.loading && images.length > 0 && (
+          <BulkSelectPanel
+            images={images}
+            page={list.params.page}
+            onApply={(categories, mode) => csvSel.bulkApply(images, categories, mode)}
+            onClearAll={csvSel.clear}
+          />
+        )}
 
         {list.error && (
           <p className="border border-danger bg-danger-soft px-4 py-3 text-sm text-danger" role="alert">
@@ -217,6 +266,8 @@ export default function ImagesPage() {
 
         <SelectionBar
           count={csvSel.count}
+          marking={bulkBusy}
+          onMarkUsed={bulkMarkUsed}
           onDownload={downloadCsv}
           onClear={csvSel.clear}
         />

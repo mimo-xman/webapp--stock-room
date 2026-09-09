@@ -425,6 +425,74 @@ async function update(req, res, next) {
   }
 }
 
+/**
+ * POST /api/images/bulk-used
+ * Bulk "Mark as used" for the webapp multi-selection: stamps many images
+ * and/or upscale variants in ONE request (used: true → Adobe Stock, the
+ * primary platform — exactly like the single-image stamp; used: false →
+ * clear every platform). Idempotent per target; unknown targets are
+ * reported in `missing` instead of failing the whole batch.
+ */
+async function bulkUsed(req, res, next) {
+  try {
+    const { used, image_ids = [], upscales = [] } = req.validated;
+
+    // Group the requested targets by parent image — one load + one save per
+    // image even when it carries both the image stamp and several variants.
+    const byImage = new Map();
+    for (const id of image_ids) {
+      const entry = byImage.get(String(id)) || { stampImage: false, upscaleIds: new Set() };
+      entry.stampImage = true;
+      byImage.set(String(id), entry);
+    }
+    for (const target of upscales) {
+      const key = String(target.image_id);
+      const entry = byImage.get(key) || { stampImage: false, upscaleIds: new Set() };
+      entry.upscaleIds.add(String(target.upscale_id));
+      byImage.set(key, entry);
+    }
+
+    const images = [];
+    const missing = [];
+    let marked = 0;
+
+    for (const [imageId, plan] of byImage) {
+      const image = await Image.findById(imageId);
+      if (!image) {
+        if (plan.stampImage) missing.push({ image_id: imageId });
+        for (const upscaleId of plan.upscaleIds) {
+          missing.push({ image_id: imageId, upscale_id: upscaleId });
+        }
+        continue;
+      }
+
+      if (plan.stampImage) {
+        image.used = used
+          ? { ...emptyUsed(), ...(image.used || {}), adobe_stock: true }
+          : emptyUsed();
+        marked += 1;
+      }
+
+      for (const upscaleId of plan.upscaleIds) {
+        const upscale = image.upscales && image.upscales.id(upscaleId);
+        if (!upscale) {
+          missing.push({ image_id: imageId, upscale_id: upscaleId });
+          continue;
+        }
+        upscale.used_in_adobe_stock = used;
+        marked += 1;
+      }
+
+      await image.save(); // pre('save') keeps used_count in sync
+      images.push(toPlain(image));
+    }
+
+    res.json({ data: { marked, images, missing } });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function remove(req, res, next) {
   try {
     const image = await Image.findByIdAndDelete(req.params.id);
@@ -771,6 +839,7 @@ module.exports = {
   release,
   getOne,
   update,
+  bulkUsed,
   remove,
   download,
   addUpscale,

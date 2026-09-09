@@ -25,7 +25,8 @@ const {
   exactFilter,
   paginationMeta,
 } = require('../utils/listQuery');
-const { streamRemoteImage } = require('../utils/proxyImage');
+const archiver = require('archiver');
+const { streamRemoteImage, extFromType } = require('../utils/proxyImage');
 const { destroyAsset } = require('../utils/cloudinary');
 const { HttpError } = require('../middleware/errorHandler');
 
@@ -753,6 +754,255 @@ async function downloadUpscale(req, res, next) {
   }
 }
 
+// ── whole-product ZIP download (webapp "Download all as ZIP") ──────────────
+
+/** Parallel upstream fetches while building the ZIP (bounded memory). */
+const ZIP_CONCURRENCY = 4;
+
+/** Extension guess from the source URL path (png when nothing sane). */
+function extFromUrl(url) {
+  try {
+    const last = (new URL(url).pathname.split('/').pop() || '');
+    const dot = last.lastIndexOf('.');
+    if (dot <= 0) return 'png';
+    const ext = last.slice(dot + 1).toLowerCase();
+    return /^[a-z0-9]{1,5}$/.test(ext) ? ext : 'png';
+  } catch {
+    return 'png';
+  }
+}
+
+function formatBytes(bytes) {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/** Fetch ONE remote file to a buffer (never throws — failures become report
+ *  entries inside the ZIP). Extension truth lives in the Content-Type. */
+async function fetchZipEntry(task) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONFIG.DOWNLOAD_TIMEOUT_MS);
+  try {
+    const upstream = await fetch(task.url, { signal: controller.signal, redirect: 'follow' });
+    if (!upstream.ok) return { error: `HTTP ${upstream.status}` };
+    const type = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    if (buffer.length === 0) return { error: 'empty body' };
+    return { buffer, contentType: type };
+  } catch (e) {
+    return { error: e && e.name === 'AbortError' ? 'timeout' : (e && e.message) || 'fetch failed' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** metadata.txt — the product's listing block + per-image inventory, so the
+ *  ZIP is self-contained for the Etsy upload session. */
+function buildMetadataTxt(product) {
+  const md = product.metadata || {};
+  const lines = [];
+  lines.push('STOCK ROOM — ETSY PRODUCT METADATA');
+  lines.push('===================================');
+  lines.push('');
+  lines.push(`Title:          ${md.title || 'Untitled'}`);
+  lines.push(`Product type:   ${product.product_type}`);
+  lines.push(`Session:        ${product.session_id}`);
+  lines.push(`Listed on Etsy: ${product.used_in_etsy ? 'yes' : 'no'}`);
+  lines.push(`Created:        ${product.createdAt ? new Date(product.createdAt).toISOString() : '-'}`);
+  lines.push(`Updated:        ${product.updatedAt ? new Date(product.updatedAt).toISOString() : '-'}`);
+  lines.push('');
+  lines.push('LISTING');
+  lines.push('-------');
+  lines.push('Description:');
+  const description = String(md.description || '').trim() || '-';
+  for (const paragraph of description.split(/\r?\n/)) {
+    lines.push(`  ${paragraph}`);
+  }
+  lines.push('');
+  lines.push(`Category:        ${md.category || '-'}`);
+  lines.push(`Price:           ${typeof md.price === 'number' ? `${md.price.toFixed(2)} USD` : '-'}`);
+  const tags = Array.isArray(md.tags) ? md.tags : [];
+  lines.push(`${`Tags (${tags.length}):`.padEnd(17)}${tags.join(', ') || '-'}`);
+  lines.push(`Deliverable file: ${product.file_link || '-'}`);
+  lines.push('');
+  lines.push(`IMAGES (${product.images.length})`);
+  lines.push('----------');
+  product.images.forEach((image, i) => {
+    lines.push('');
+    lines.push(
+      `[${String(i + 1).padStart(2, '0')}] ${image.role} - "${(image.caption || '').trim()}" (${image.ratio}, ${image.quality})`
+    );
+    if (image.prompt) lines.push(`     prompt: ${image.prompt}`);
+    const upscales = image.upscales || [];
+    if (upscales.length > 0) {
+      const details = upscales
+        .map((u) => {
+          const size = u.width && u.height ? `, ${u.width}x${u.height}px` : '';
+          const weight = u.size_bytes ? `, ${formatBytes(u.size_bytes)}` : '';
+          return `x${u.scale}${size}${weight}`;
+        })
+        .join(' | ');
+      lines.push(`     upscales: ${details}`);
+    }
+  });
+  lines.push('');
+  return lines.join('\n');
+}
+
+/** _download-report.txt — included only when some files could not be fetched. */
+function buildReportTxt(failures) {
+  const lines = [];
+  lines.push('DOWNLOAD REPORT');
+  lines.push('===============');
+  lines.push('');
+  lines.push(
+    `${failures.length} file(s) could not be fetched at their source and are missing from this ZIP:`
+  );
+  lines.push('');
+  for (const f of failures) {
+    lines.push(`- ${f.name} — ${f.reason}`);
+    lines.push(`  source: ${f.url}`);
+  }
+  lines.push('');
+  lines.push('The stored links may have expired — re-check them from the product detail popup.');
+  lines.push('');
+  return lines.join('\n');
+}
+
+/**
+ * GET /api/etsy-products/:id/download-zip?origin=1&x2=1&x4=1&metadata=1
+ *
+ * The whole product as ONE streamed ZIP: every image's original and/or
+ * upscaled variants (Real-ESRGAN x2 / x4), plus metadata.txt with the listing
+ * block. NOTHING is included by default — the webapp popup checks exactly
+ * what the user asked for.
+ *
+ * Files keep the product's image order (01-, 02-… prefixes), failures never
+ * abort the archive: they land in _download-report.txt instead. Fetches run
+ * through a small worker pool (ZIP_CONCURRENCY) and buffers are appended in
+ * order as they arrive, so memory stays bounded on big products.
+ */
+async function downloadZip(req, res, next) {
+  try {
+    const flag = (v) => v === '1' || v === 'true';
+    const wantOrigin = flag(req.query.origin);
+    const wantX2 = flag(req.query.x2);
+    const wantX4 = flag(req.query.x4);
+    const wantMetadata = flag(req.query.metadata);
+    if (!wantOrigin && !wantX2 && !wantX4 && !wantMetadata) {
+      return res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Nothing selected — pass origin=1, x2=1, x4=1 and/or metadata=1',
+        },
+      });
+    }
+
+    assertIds(req.params.id);
+    const product = await EtsyProduct.findById(req.params.id);
+    if (!product) {
+      throw new HttpError(404, 'NOT_FOUND', `Etsy product ${req.params.id} does not exist`);
+    }
+
+    // Ordered task list — the zip preserves the product's image order.
+    const usedNames = new Set();
+    const uniqueName = (base) => {
+      let name = base;
+      let n = 2;
+      while (usedNames.has(name)) name = `${base}-${n++}`;
+      usedNames.add(name);
+      return name;
+    };
+    const tasks = [];
+    product.images.forEach((image, i) => {
+      const label = slugify(imageLabel(image, i));
+      const prefix = String(i + 1).padStart(2, '0');
+      if (wantOrigin) {
+        tasks.push({ name: uniqueName(`${prefix}-${label}`), url: image.image_link });
+      }
+      for (const upscale of image.upscales || []) {
+        if ((upscale.scale === 2 && wantX2) || (upscale.scale === 4 && wantX4)) {
+          tasks.push({
+            name: uniqueName(`${prefix}-${label}_x${upscale.scale}`),
+            url: upscale.url,
+          });
+        }
+      }
+    });
+
+    const failures = [];
+    const filesPlanned = tasks.length + (wantMetadata ? 1 : 0);
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${slugify(productTitle(product))}.zip"`
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Zip-Files', String(filesPlanned));
+
+    const archive = archiver('zip', { zlib: { level: 0 } }); // images are already compressed
+    archive.on('warning', (w) => console.warn('[api] zip warning:', w.message));
+    archive.on('error', (e) => {
+      console.error('[api] zip stream error:', e.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: { code: 'INTERNAL', message: 'The ZIP stream failed while building' } });
+      } else {
+        res.destroy();
+      }
+    });
+    archive.pipe(res);
+    res.on('close', () => {
+      if (!res.writableEnded) archive.abort();
+    });
+
+    // Ordered pipeline: N fetchers fill slot i, one drainer appends in order
+    // and releases each buffer as soon as it is written to the archive.
+    const slots = new Array(tasks.length).fill(null);
+    let nextToAppend = 0;
+    function drain() {
+      while (nextToAppend < tasks.length && slots[nextToAppend]) {
+        const task = tasks[nextToAppend];
+        const result = slots[nextToAppend];
+        if (result.error) {
+          failures.push({ name: task.name, url: task.url, reason: result.error });
+        } else {
+          const ext = extFromType(result.contentType) || extFromUrl(task.url);
+          archive.append(result.buffer, { name: `${task.name}.${ext}` });
+        }
+        slots[nextToAppend] = null; // release the buffer
+        nextToAppend += 1;
+      }
+    }
+
+    let cursor = 0;
+    async function worker() {
+      while (cursor < tasks.length) {
+        const i = cursor++;
+        slots[i] = await fetchZipEntry(tasks[i]);
+        drain();
+      }
+    }
+    const workers = Array.from(
+      { length: Math.max(1, Math.min(ZIP_CONCURRENCY, tasks.length)) },
+      () => worker()
+    );
+    await Promise.all(workers);
+    drain(); // safety — everything must be appended before finalize
+
+    if (wantMetadata) {
+      archive.append(buildMetadataTxt(product), { name: 'metadata.txt' });
+    }
+    if (failures.length > 0) {
+      archive.append(buildReportTxt(failures), { name: '_download-report.txt' });
+    }
+
+    await archive.finalize();
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   list,
   create,
@@ -765,6 +1015,7 @@ module.exports = {
   updateImage,
   removeImage,
   downloadImage,
+  downloadZip,
   addUpscale,
   updateUpscale,
   removeUpscale,

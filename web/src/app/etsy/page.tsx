@@ -15,6 +15,7 @@ import { EmptyState } from "@/components/app/EmptyState";
 import { EtsyProductDetailDialog } from "@/components/app/EtsyProductDetailDialog";
 import { EtsyProductFormDialog } from "@/components/app/EtsyProductFormDialog";
 import { EtsyProductGrid } from "@/components/app/EtsyProductGrid";
+import { EtsyZipDialog } from "@/components/app/EtsyZipDialog";
 import { useList, useSessionOptions } from "@/hooks/use-list";
 import { api } from "@/lib/api";
 import { ETSY_PRODUCT_TYPES, ETSY_SORTS } from "@/lib/constants";
@@ -29,6 +30,8 @@ export default function EtsyPage() {
   const [detail, setDetail] = useState<EtsyProduct | null>(null);
   const [editing, setEditing] = useState<EtsyProduct | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [zipProduct, setZipProduct] = useState<EtsyProduct | null>(null);
+  const [zipDialogOpen, setZipDialogOpen] = useState(false);
 
   const products = list.items as EtsyProduct[];
 
@@ -150,7 +153,14 @@ export default function EtsyPage() {
             }
           />
         ) : (
-          <EtsyProductGrid products={products} onOpen={openDetail} />
+          <EtsyProductGrid
+            products={products}
+            onOpen={openDetail}
+            onDownloadZip={(p) => {
+              setZipProduct(p);
+              setZipDialogOpen(true);
+            }}
+          />
         )}
 
         <PaginationBar pagination={list.pagination} onChange={list.updateParams} />
@@ -167,6 +177,8 @@ export default function EtsyPage() {
         }}
         onDelete={deleteProduct}
       />
+
+      <EtsyZipDialog product={zipProduct} open={zipDialogOpen} onOpenChange={setZipDialogOpen} />
 
       <EtsyProductFormDialog
         open={formOpen}
