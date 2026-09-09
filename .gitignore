@@ -36,3 +36,5 @@ web/.open-next/
 web/.wrangler/
 web/.dev.vars
 web/cloudflare-env.d.ts
+
+.qoder
