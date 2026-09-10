@@ -8,9 +8,10 @@
  * The Map lives in the PAGE component (mounted once per route), so the
  * selection SURVIVES pagination, filtering and sorting — all of those only
  * refetch the list, they never unmount the page. Each entry snapshots the
- * image doc (and the chosen upscale variant) at selection time: the CSV can
- * still be built even if the list has since moved to another page, and the
- * bulk stamp carries the exact variant ids.
+ * image doc (and the chosen upscale variant) at selection time — the SNAPSHOT
+ * IS the selection (stable ids), but nothing ever READS from it: before any
+ * action (platform-picker stats, CSV build, bulk stamp) the page re-reads
+ * every selected image from the DB via fetchFreshSelectionItems().
  *
  * bulkApply() powers the Select all / Deselect all bar: it applies one set
  * of categories (original / ×2 / ×4 upscales) to a whole PAGE of images at
@@ -21,6 +22,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { CsvSelectionItem } from "@/lib/csv";
 import type { StockImage, Upscale } from "@/lib/types";
+import { api } from "@/lib/api";
 
 /** Variant id for the original image inside the selection keys. */
 export const ORIGINAL_VARIANT = "original";
@@ -92,3 +94,39 @@ export function useCsvSelection() {
 }
 
 export type CsvSelection = ReturnType<typeof useCsvSelection>;
+
+/**
+ * Re-read the whole checkbox selection FROM THE DB right before acting on
+ * it (mark/unmark popup stats, CSV export): never trust the grid snapshot
+ * for reads — an image or variant may have been stamped, edited or deleted
+ * since it was selected. Deleted images / deleted variants are dropped and
+ * counted in `skipped` so the caller can warn about them.
+ */
+export async function fetchFreshSelectionItems(
+  items: CsvSelectionItem[],
+): Promise<{ items: CsvSelectionItem[]; skipped: number; missingImages: string[] }> {
+  const ids = [...new Set(items.map((it) => it.image._id))];
+  if (ids.length === 0) return { items: [], skipped: 0, missingImages: [] };
+  const res = await api.images.bulkFetch(ids);
+  const byId = new Map(res.images.map((d) => [d._id, d]));
+  const fresh: CsvSelectionItem[] = [];
+  let skipped = 0;
+  for (const it of items) {
+    const doc = byId.get(it.image._id);
+    if (!doc) {
+      skipped += 1; // the whole image is gone
+      continue;
+    }
+    if (it.upscale) {
+      const freshUpscale = doc.upscales?.find((u) => u._id === it.upscale!._id);
+      if (!freshUpscale) {
+        skipped += 1; // that variant was deleted since selection
+        continue;
+      }
+      fresh.push({ image: doc, upscale: freshUpscale });
+    } else {
+      fresh.push({ image: doc });
+    }
+  }
+  return { items: fresh, skipped, missingImages: res.missing.map((m) => m.image_id) };
+}

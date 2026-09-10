@@ -84,9 +84,11 @@ On `/images` and `/sessions/:id`:
    image, but they still feed the CSV export row by row).
 3. **Download CSV** — the button on the floating bar opens the **platform picker
    dialog**: every marketplace is listed with its status (`CSV ready` /
-   `coming soon`) and its AI-content policy badge. Clicking a ready platform builds
-   the file (client-side, no API call) and downloads it as
-   `<platform>-upload-YYYY-MM-DD.csv`. A toast confirms the row count and
+   `coming soon`) and its AI-content policy badge. Clicking a ready platform
+   **re-reads the whole selection from the DB first** (`POST /api/images/bulk-fetch`
+   — fresh rows; assets deleted since the selection are skipped and reported
+   in the toast), then builds the file (client-side, no API call) and downloads
+   it as `<platform>-upload-YYYY-MM-DD.csv`. A toast confirms the row count and
    surfaces any warnings (keyword minimums, truncations, filename collisions).
 4. **Upload to the platform** — upload the selected image files first (each
    variant downloads with a proper filename from the detail dialog), then import

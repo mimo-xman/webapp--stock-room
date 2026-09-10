@@ -452,18 +452,21 @@ async function main() {
       password: APP_PASSWORD,
       body: { used: true, platforms: ['adobe_stock', 'dreamstime'], image_ids: bulkIds },
     });
-    ok('bulk mark on 2 platforms → 200, marked=3', r.status === 200 && r.json.data.marked === 3, r.json);
+    ok('bulk mark on 2 platforms → 200, marked=3, changed=3',
+      r.status === 200 && r.json.data.marked === 3 && r.json.data.changed === 3, r.json);
     ok('both flags set on every image', r.json.data.images.every((d) => d.used.adobe_stock === true && d.used.dreamstime === true));
     ok('other platforms untouched', r.json.data.images.every((d) => d.used.shutterstock === false));
     ok('upscale inherits the adobe flag',
       r.json.data.images.find((d) => d._id === bulkIds[0]).upscales[0].used_in_adobe_stock === true);
 
+    // already-marked targets are SKIPPED (no write, flags stay, changed=0)
     r = await call('POST', '/api/images/bulk-used', {
       password: APP_PASSWORD,
       body: { used: true, platforms: ['adobe_stock', 'adobe_stock', 'dreamstime'], image_ids: bulkIds.slice(0, 2) },
     });
-    ok('duplicated platforms deduped, mark stays additive',
-      r.status === 200 && r.json.data.marked === 2 && r.json.data.images.every((d) => d.used.adobe_stock === true && d.used.dreamstime === true));
+    ok('duplicated platforms deduped, already-marked skipped (changed=0, flags stay)',
+      r.status === 200 && r.json.data.marked === 2 && r.json.data.changed === 0 &&
+      r.json.data.images.every((d) => d.used.adobe_stock === true && d.used.dreamstime === true));
 
     r = await call('POST', '/api/images/bulk-used', {
       password: APP_PASSWORD,
@@ -473,6 +476,55 @@ async function main() {
       r.json.data.images.every((d) => d.used.adobe_stock === false && d.used.dreamstime === true));
     ok('upscale follows the unmark',
       r.json.data.images.find((d) => d._id === bulkIds[0]).upscales[0].used_in_adobe_stock === false);
+
+    // ── bulk-fetch (fresh-from-the-DB read for the webapp selection) ─────────
+    console.log('─ bulk-fetch (fresh read for the popup stats / CSV)');
+    r = await call('POST', '/api/images/bulk-fetch', {
+      password: APP_PASSWORD,
+      body: { image_ids: [bulkIds[2], bulkIds[0], '000000000000000000000000', bulkIds[1]] },
+    });
+    ok('bulk-fetch → 200, request order kept, unknown ids in missing',
+      r.status === 200 &&
+      r.json.data.images.length === 3 &&
+      r.json.data.images.map((d) => d._id).join(',') === [bulkIds[2], bulkIds[0], bulkIds[1]].join(',') &&
+      r.json.data.missing.length === 1 && r.json.data.missing[0].image_id === '000000000000000000000000',
+      r.json);
+    ok('bulk-fetch returns the FRESH state (adobe unmarked above)',
+      r.json.data.images.every((d) => d.used.adobe_stock === false && d.used.dreamstime === true));
+
+    r = await call('POST', '/api/images/bulk-fetch', {
+      key: API_KEY,
+      body: { image_ids: [bulkIds[0]] },
+    });
+    ok('bulk-fetch with the agent key → 200 (dual credential)', r.status === 200 && r.json.data.images.length === 1);
+
+    r = await call('POST', '/api/images/bulk-fetch', { body: { image_ids: [bulkIds[0]] } });
+    ok('bulk-fetch without credentials → 401', r.status === 401);
+    // the intentional 401 re-arms the brute-force guard (failed-auth counter
+    // still above badAuthMax in the window) — let the block expire.
+    await new Promise((resolve) => setTimeout(resolve, 450));
+
+    r = await call('POST', '/api/images/bulk-fetch', { password: APP_PASSWORD, body: { image_ids: [] } });
+    ok('bulk-fetch empty ids → 400', r.status === 400);
+
+    r = await call('POST', '/api/images/bulk-fetch', { password: APP_PASSWORD, body: { image_ids: ['not-an-objectid'] } });
+    ok('bulk-fetch bad objectId → 400', r.status === 400);
+
+    r = await call('POST', '/api/images/bulk-fetch', { password: APP_PASSWORD, body: {} });
+    ok('bulk-fetch no image_ids → 400', r.status === 400);
+
+    r = await call('POST', '/api/images/bulk-fetch', {
+      password: APP_PASSWORD,
+      body: { image_ids: [bulkIds[0]], extra: 1 },
+    });
+    ok('bulk-fetch strict schema → 400 on unknown key', r.status === 400);
+
+    // bulk-fetch cap: 201 ids → 400 (the webapp chunks at 200)
+    r = await call('POST', '/api/images/bulk-fetch', {
+      password: APP_PASSWORD,
+      body: { image_ids: Array.from({ length: 201 }, () => bulkIds[0]) },
+    });
+    ok('bulk-fetch > 200 ids → 400', r.status === 400);
 
     r = await call('POST', '/api/images/bulk-used', {
       password: APP_PASSWORD,

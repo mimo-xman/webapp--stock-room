@@ -260,6 +260,20 @@ const imageBulkUsedSchema = z
     message: 'provide at least one image_id — upscale variants are stamped through their original image',
   });
 
+// ── bulk fresh read (webapp multi-selection) ───────────────────────────────
+// POST /api/images/bulk-fetch — re-read every selected image from the DB
+// BEFORE the webapp acts on the selection (platform-picker stats, CSV
+// build): the grid snapshot is never trusted for reads. Same cap as the
+// bulk stamp; the webapp chunks larger selections.
+const imageBulkFetchSchema = z
+  .object({
+    image_ids: z
+      .array(objectId)
+      .min(1, 'provide at least one image_id')
+      .max(BULK_USED_MAX, `at most ${BULK_USED_MAX} images per bulk fetch`),
+  })
+  .strict();
+
 // ── parallel batch workers (claim / release) ──
 // POST /api/images/claim — a batch worker atomically reserves the oldest
 // eligible image (upscales < max_upscales, active, not already claimed —
@@ -465,6 +479,7 @@ module.exports = {
   imageBulkUsedSchema,
   imageClaimSchema,
   imageReleaseSchema,
+  imageBulkFetchSchema,
   upscaleCreateSchema,
   etsyProductCreateSchema,
   etsyProductUpdateSchema,

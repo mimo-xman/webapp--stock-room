@@ -15,6 +15,7 @@ const {
   imageBulkUsedSchema,
   imageClaimSchema,
   imageReleaseSchema,
+  imageBulkFetchSchema,
   upscaleCreateSchema,
   etsyProductCreateSchema,
   etsyProductUpdateSchema,
@@ -76,6 +77,9 @@ router.post('/api/images/claim', validate(imageClaimSchema), imageController.cla
 // Webapp multi-selection: stamp many images at once, on the platforms
 // chosen in the popup (upscales follow their original — no per-variant stamps).
 router.post('/api/images/bulk-used', validate(imageBulkUsedSchema), imageController.bulkUsed);
+// Webapp multi-selection: fresh-from-the-DB read of every selected image
+// (platform-picker stats + CSV build — the grid snapshot is never trusted).
+router.post('/api/images/bulk-fetch', validate(imageBulkFetchSchema), imageController.bulkFetch);
 router.get('/api/images/:id', imageController.getOne);
 router.patch('/api/images/:id', validate(imageUpdateSchema), imageController.update);
 router.post('/api/images/:id/release', validate(imageReleaseSchema), imageController.release);

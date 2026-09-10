@@ -12,14 +12,21 @@
  *   [] Shutterstock        0 marked   (disabled in unmark mode)
  *   …
  *
+ * The counts are computed from FRESH DB data — the parent re-reads every
+ * selected image (POST /api/images/bulk-fetch) while `loading` is true;
+ * until it lands the rows and the confirm button stay disabled.
+ *
  * The stamp applies to the SELECTED ORIGIN IMAGES only: upscale variants
  * have no used state of their own — they follow their original image, so
  * checking "origin images" in the Select-all panel (or the per-card
  * checkboxes) is what feeds this popup. Upscales in the selection are
  * ignored for the stamp (they still feed the CSV export).
  *
- * Unmark mode adds a "Clear everything" shortcut that wipes every platform
- * of the whole selection in one click (same as the single-image stamp).
+ * Mark mode disables platforms with NOTHING left to mark ([0 TO MARK] —
+ * every selected origin is already used there: it would be a no-op, those
+ * images stay marked as they are). Unmark mode disables platforms with
+ * [0 MARKED] the same way. "Clear everything" wipes every platform of the
+ * whole selection in one click (same as the single-image stamp).
  */
 
 import { useState } from "react";
@@ -42,6 +49,8 @@ interface BulkUsedDialogProps {
   mode: "mark" | "unmark";
   /** The whole checkbox selection — origins feed the stamp, upscales are ignored. */
   items: CsvSelectionItem[];
+  /** Fresh stats are being re-read from the DB (popup just opened). */
+  loading?: boolean;
   /** Bulk request in flight ("Stamping…" state). */
   busy?: boolean;
   /** Confirm with the chosen platforms. */
@@ -55,6 +64,7 @@ export function BulkUsedDialog({
   onOpenChange,
   mode,
   items,
+  loading = false,
   busy = false,
   onConfirm,
   onClearAll,
@@ -78,9 +88,10 @@ export function BulkUsedDialog({
   const chosen = PLATFORMS.filter((p) => checked[p.id]).map((p) => p.id);
   const anyChecked = chosen.length > 0;
   const marking = mode === "mark";
+  const locked = loading || busy;
 
   function confirm() {
-    if (!anyChecked || busy) return;
+    if (!anyChecked || locked) return;
     onConfirm(chosen);
   }
 
@@ -115,15 +126,23 @@ export function BulkUsedDialog({
         <div className="divide-y divide-line">
           {PLATFORMS.map((p) => {
             const marked = platformCount(p.id);
-            const disabled = busy || (marking ? false : marked === 0);
+            const toMark = origins.length - marked;
+            // mark mode: nothing left to mark (all already used there — a
+            // no-op; those images stay marked) → disabled, like the unmark
+            // mode disables platforms with nothing marked.
+            const disabled = locked || (marking ? toMark === 0 : marked === 0);
             return (
               <CheckRow
                 key={p.id}
                 checked={Boolean(checked[p.id])}
                 onToggle={() => setChecked((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
                 label={p.label}
-                hint={marking ? `${p.aiNote}` : `${origins.length - marked} not marked · ${p.aiNote}`}
-                count={marking ? origins.length - marked : marked}
+                hint={
+                  marking
+                    ? `${toMark} to mark · ${marked} already marked · ${p.aiNote}`
+                    : `${origins.length - marked} not marked · ${p.aiNote}`
+                }
+                count={marking ? toMark : marked}
                 countLabel={marking ? "to mark" : "marked"}
                 disabled={disabled}
                 testId={`bulk-platform-${p.id}`}
@@ -137,6 +156,13 @@ export function BulkUsedDialog({
             Upscale variants have no used state of their own — they follow their original
             image on every platform, so one stamp covers the whole set.
           </p>
+          {loading && (
+            <p className="flex items-center gap-2 font-mono text-[10.5px] text-ink-muted" data-testid="bulk-used-loading">
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin text-brand" aria-hidden />
+              re-reading the {items.length} selected asset{items.length === 1 ? "" : "s"} from the DB —
+              fresh counts in a moment…
+            </p>
+          )}
           {busy && (
             <p className="flex items-center gap-2 font-mono text-[10.5px] text-ink-muted">
               <LoaderCircle className="h-3.5 w-3.5 animate-spin text-brand" aria-hidden />
@@ -148,7 +174,7 @@ export function BulkUsedDialog({
               <button
                 type="button"
                 onClick={onClearAll}
-                disabled={busy}
+                disabled={locked}
                 className="flex h-10 items-center gap-1.5 border border-danger/40 bg-surface px-3 font-display text-xs font-semibold uppercase tracking-widest text-danger transition-colors hover:border-danger hover:bg-danger-soft focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-60"
                 data-testid="bulk-unmark-clear-all"
               >
@@ -167,7 +193,7 @@ export function BulkUsedDialog({
             <button
               type="button"
               onClick={confirm}
-              disabled={!anyChecked || busy}
+              disabled={!anyChecked || locked}
               className={
                 marking
                   ? "flex h-10 items-center gap-2 bg-brand px-4 font-display text-sm font-bold uppercase tracking-widest text-white shadow-[var(--shadow-hard-sm)] transition-colors hover:bg-brand-deep focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-60"

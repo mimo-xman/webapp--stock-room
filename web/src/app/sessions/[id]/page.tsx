@@ -12,7 +12,7 @@
  * popup, image cards open the image detail popup.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Plus, Trash2, Images, Store } from "lucide-react";
@@ -28,7 +28,7 @@ import { EtsyProductGrid } from "@/components/app/EtsyProductGrid";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { EmptyState } from "@/components/app/EmptyState";
 import { useList, useSessionOptions } from "@/hooks/use-list";
-import { useCsvSelection } from "@/hooks/use-csv-selection";
+import { useCsvSelection, fetchFreshSelectionItems } from "@/hooks/use-csv-selection";
 import { api, ApiError } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { IMAGE_SORTS, PLATFORMS } from "@/lib/constants";
@@ -39,6 +39,7 @@ import { BulkUsedDialog } from "@/components/app/BulkUsedDialog";
 import { EtsyZipDialog } from "@/components/app/EtsyZipDialog";
 import { CsvPlatformDialog } from "@/components/app/CsvPlatformDialog";
 import type { Session, StockImage, EtsyProduct, PlatformId } from "@/lib/types";
+import type { CsvSelectionItem } from "@/lib/csv";
 
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -49,18 +50,28 @@ export default function SessionDetailPage() {
   const [sessionError, setSessionError] = useState<string | null>(null);
 
   // ── sellable images of this session ──
-  const list = useList((p) => api.images.list({ ...p, filters: { ...p.filters, session_id: id } }), {
-    filters: { session_id: id },
-  });
+  // URL sync: the images list owns the bare keys (page, sort…), the product
+  // list below owns the `ep_*` keys — both survive reload / Back.
+  const list = useList(
+    (p) => api.images.list({ ...p, filters: { ...p.filters, session_id: id } }),
+    {
+      filters: { session_id: id },
+    },
+    { filterKeys: ["category", "active", "used", "quality", "has_upscales"] },
+  );
   const sessionOptions = useSessionOptions();
   const csvSel = useCsvSelection();
   const [csvDialogOpen, setCsvDialogOpen] = useState(false);
 
   // ── Etsy products of this session ──
-  const productList = useList((p) => api.etsyProducts.list({ ...p, filters: { ...p.filters, session_id: id } }), {
-    filters: { session_id: id },
-    limit: 20,
-  });
+  const productList = useList(
+    (p) => api.etsyProducts.list({ ...p, filters: { ...p.filters, session_id: id } }),
+    {
+      filters: { session_id: id },
+      limit: 20,
+    },
+    { prefix: "ep", filterKeys: [] },
+  );
 
   const [detail, setDetail] = useState<StockImage | null>(null);
   const [editing, setEditing] = useState<StockImage | null>(null);
@@ -73,6 +84,9 @@ export default function SessionDetailPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
   /** Platform picker popup (opened by the SelectionBar's stamp buttons). */
   const [bulkMode, setBulkMode] = useState<"mark" | "unmark" | null>(null);
+  /** Fresh-from-the-DB copy of the selection for the popup counts. */
+  const [bulkItems, setBulkItems] = useState<CsvSelectionItem[] | null>(null);
+  const [bulkLoading, setBulkLoading] = useState(false);
   const [zipProduct, setZipProduct] = useState<EtsyProduct | null>(null);
   const [zipDialogOpen, setZipDialogOpen] = useState(false);
 
@@ -104,7 +118,8 @@ export default function SessionDetailPage() {
 
   /** Quick stamp: not used anywhere → mark Adobe Stock (the primary);
    *  used somewhere → clear every platform. Open the image for per-platform
-   *  stamps. */
+   *  stamps. The optimistic patch is reconciled with the DB response (the
+   *  upscales inherit the stamp server-side). */
   async function toggleUsed(image: StockImage) {
     const anyNow = (image.used_count ?? 0) > 0 || Object.values(image.used ?? {}).some(Boolean);
     const usedNext = anyNow
@@ -115,41 +130,35 @@ export default function SessionDetailPage() {
       used_in_adobe_stock: usedNext.adobe_stock === true,
       used_count: Object.values(usedNext).filter(Boolean).length,
     };
-    if (detail?._id === image._id) setDetail({ ...detail, ...patch });
+    setDetail((d) => (d && d._id === image._id ? { ...d, ...patch } : d));
     list.patchLocal(image._id, patch);
     if (patch.used_count > 0) setThunk((t) => t + 1);
     try {
-      await api.images.update(image._id, { used: usedNext });
+      const res = await api.images.update(image._id, { used: usedNext });
+      // reconcile with the fresh DB doc (full row refresh)
+      setDetail((d) => (d && d._id === res.data._id ? res.data : d));
+      list.patchLocal(res.data._id, res.data);
+      refreshSessionHeader();
     } catch {
       const rollback = { used: image.used, used_in_adobe_stock: image.used_in_adobe_stock, used_count: image.used_count };
       list.patchLocal(image._id, rollback);
-      if (detail?._id === image._id) setDetail({ ...detail, ...rollback });
+      setDetail((d) => (d && d._id === image._id ? { ...d, ...rollback } : d));
       toast({ variant: "destructive", title: "Update failed", description: "The stamp was not applied." });
     }
   }
 
-  /** Detail dialog reports upscale mutations (mark used / delete) and
-   *  batch-status changes (pause / error dismissed) with the updated image —
-   *  refresh the detail state and the grid row in place. */
+  /** Detail dialog reports mutations (fresh DB doc in the API responses,
+   *  silent refresh on open) — refresh the detail state and the grid row
+   *  in place with the WHOLE doc (never a stale subset). */
   function handleImageUpdate(updated: StockImage) {
     setDetail((d) => (d && d._id === updated._id ? updated : d));
-    list.patchLocal(updated._id, {
-      upscales: updated.upscales,
-      active: updated.active,
-      in_use: updated.in_use,
-      in_use_at: updated.in_use_at,
-      error_message: updated.error_message,
-    });
+    list.patchLocal(updated._id, updated);
   }
 
   function handleProductUpdate(updated: EtsyProduct) {
     setProductDetail((d) => (d && d._id === updated._id ? updated : d));
     setEditingProduct((e) => (e && e._id === updated._id ? updated : e));
-    productList.patchLocal(updated._id, {
-      used_in_etsy: updated.used_in_etsy,
-      metadata: updated.metadata,
-      images: updated.images,
-    });
+    productList.patchLocal(updated._id, updated);
   }
 
   async function deleteImage(image: StockImage) {
@@ -182,11 +191,51 @@ export default function SessionDetailPage() {
     setCsvDialogOpen(true);
   }
 
+  /** Fresh copy of the whole selection, re-read from the DB — the popup
+   *  counts ([N to mark] / [N marked]) and the CSV rows are computed from
+   *  the DB state, never from the grid snapshot. */
+  function refreshBulkItems(): Promise<{ items: CsvSelectionItem[]; skipped: number }> {
+    return fetchFreshSelectionItems(csvSel.list).then(({ items, skipped }) => {
+      setBulkItems(items);
+      return { items, skipped };
+    });
+  }
+
+  // The platform-picker popup re-reads the selection from the DB every
+  // time it opens (mark AND unmark) — fresh stats, no cached data.
+  const csvListRef = useRef(csvSel.list);
+  csvListRef.current = csvSel.list;
+  useEffect(() => {
+    if (bulkMode === null) {
+      setBulkItems(null);
+      return;
+    }
+    let alive = true;
+    setBulkLoading(true);
+    fetchFreshSelectionItems(csvListRef.current)
+      .then(({ items }) => {
+        if (!alive) return;
+        setBulkItems(items);
+      })
+      .catch(() => {
+        // the DB read failed — fall back to the selection snapshot
+        if (alive) setBulkItems(csvListRef.current);
+      })
+      .finally(() => {
+        if (alive) setBulkLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [bulkMode]);
+
   /** Bulk mark/unmark for the checkbox multi-selection — the SelectionBar's
    *  stamp buttons open the platform picker popup (BulkUsedDialog), then the
-   *  confirm sends ONE request for the whole batch. Only the ORIGIN images
-   *  are stamped: upscale variants follow their original image (the API
-   *  propagates the Adobe Stock flag onto every variant). */
+   *  confirm sends ONE request for the whole batch (mark mode → used:true on
+   *  the chosen platforms; unmark mode → used:false). Already-marked targets
+   *  are skipped and stay marked. Only the ORIGIN images are stamped: upscale
+   *  variants follow their original image (the API propagates the Adobe
+   *  Stock flag onto every variant). */
   async function bulkStampUsed(used: boolean, platforms?: PlatformId[]) {
     const image_ids = csvSel.list.filter((it) => !it.upscale).map((it) => it.image._id);
     if (image_ids.length === 0 || bulkBusy) return;
@@ -194,26 +243,21 @@ export default function SessionDetailPage() {
     try {
       const res = await api.images.bulkUsed({ used, platforms, image_ids });
       for (const doc of res.data.images) {
-        list.patchLocal(doc._id, {
-          used: doc.used,
-          used_count: doc.used_count,
-          used_in_adobe_stock: doc.used_in_adobe_stock,
-          upscales: doc.upscales,
-        });
+        list.patchLocal(doc._id, doc); // full fresh doc — DB state, in place
       }
       setThunk((t) => t + 1);
       refreshSessionHeader(); // the header shows the session's usedCount
       const platformNames = platforms?.map((p) => PLATFORMS.find((d) => d.id === p)?.label ?? p).join(", ");
+      const skippedNote =
+        res.data.missing.length > 0 ? ` ${res.data.missing.length} image(s) no longer exist and were skipped.` : "";
       toast({
         title: used ? "Marked as used" : "Unmarked as used",
         description: used
-          ? `${res.data.marked} image${res.data.marked === 1 ? "" : "s"} stamped on ${platformNames} — upscales follow their original — the selection was cleared.${
-              res.data.missing.length > 0 ? ` ${res.data.missing.length} image(s) no longer exist and were skipped.` : ""
-            }`
+          ? `${res.data.changed} image${res.data.changed === 1 ? "" : "s"} stamped on ${platformNames}${
+              res.data.changed < res.data.marked ? ` (${res.data.marked - res.data.changed} already marked, kept as used)` : ""
+            } — upscales follow their original — the selection was cleared.${skippedNote}`
           : platforms
-            ? `${res.data.marked} image${res.data.marked === 1 ? "" : "s"} unmarked from ${platformNames} — the selection was cleared.${
-                res.data.missing.length > 0 ? ` ${res.data.missing.length} image(s) no longer exist and were skipped.` : ""
-              }`
+            ? `${res.data.changed} image${res.data.changed === 1 ? "" : "s"} unmarked from ${platformNames} — the selection was cleared.${skippedNote}`
             : `Every platform flag cleared on ${res.data.marked} image${res.data.marked === 1 ? "" : "s"} — the selection was cleared.`,
       });
       csvSel.clear();
@@ -474,9 +518,10 @@ export default function SessionDetailPage() {
         open={bulkMode !== null}
         onOpenChange={(open) => !open && setBulkMode(null)}
         mode={bulkMode ?? "mark"}
-        items={csvSel.list}
+        items={bulkItems ?? csvSel.list}
+        loading={bulkLoading}
         busy={bulkBusy}
-        onConfirm={(platforms) => bulkStampUsed(bulkMode === "unmark", platforms)}
+        onConfirm={(platforms) => bulkStampUsed(bulkMode === "mark", platforms)}
         onClearAll={() => bulkStampUsed(false)}
       />
 
@@ -484,6 +529,7 @@ export default function SessionDetailPage() {
         open={csvDialogOpen}
         onOpenChange={setCsvDialogOpen}
         items={csvSel.list}
+        fetchFresh={refreshBulkItems}
       />
 
       <EtsyZipDialog product={zipProduct} open={zipDialogOpen} onOpenChange={setZipDialogOpen} />

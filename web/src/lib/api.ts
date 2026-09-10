@@ -5,7 +5,7 @@
  * A 401 kicks the user back to the gate (password changed or wrong).
  */
 
-import type { ListParams, ListResponse, Session, StockImage, Upscale, EtsyProduct, EtsyProductImage, EtsyProductMetadata, EtsyProductType, EtsyImageRole, ApiErrorPayload, ClaimsSnapshot, ClaimsReleaseResult, BulkUsedResult, PlatformId } from "./types";
+import type { ListParams, ListResponse, Session, StockImage, Upscale, EtsyProduct, EtsyProductImage, EtsyProductMetadata, EtsyProductType, EtsyImageRole, ApiErrorPayload, ClaimsSnapshot, ClaimsReleaseResult, BulkUsedResult, BulkFetchResult, PlatformId } from "./types";
 import { getAppPassword, clearAppPassword } from "./auth";
 
 function resolveApiUrl(): string {
@@ -120,7 +120,8 @@ export const api = {
     },
     /** Bulk mark/unmark-as-used for the checkbox multi-selection — ONE
      *  request for many images, on the platforms chosen in the popup.
-     *  Upscales follow their original image (no per-variant targets). */
+     *  Upscales follow their original image (no per-variant targets).
+     *  Already-marked targets are skipped (they stay marked). */
     bulkUsed(payload: {
       used: boolean;
       /** Chosen platforms — omit to use the legacy default
@@ -129,6 +130,31 @@ export const api = {
       image_ids?: string[];
     }): Promise<{ data: BulkUsedResult }> {
       return request("/api/images/bulk-used", { method: "POST", body: JSON.stringify(payload) });
+    },
+    /** Fresh-from-the-DB read of the selected images — the platform picker
+     *  popup and the CSV export call this BEFORE acting on the selection:
+     *  the grid snapshot is never trusted for reads. Chunks at 200 ids. */
+    async bulkFetch(imageIds: string[]): Promise<BulkFetchResult> {
+      const CHUNK = 200;
+      const unique = [...new Set(imageIds)];
+      if (unique.length === 0) return { images: [], missing: [] };
+      const chunks: string[][] = [];
+      for (let i = 0; i < unique.length; i += CHUNK) chunks.push(unique.slice(i, i + CHUNK));
+      const results = await Promise.all(
+        chunks.map((ids) =>
+          request<{ data: BulkFetchResult }>("/api/images/bulk-fetch", {
+            method: "POST",
+            body: JSON.stringify({ image_ids: ids }),
+          }),
+        ),
+      );
+      const images: StockImage[] = [];
+      const missing: { image_id: string }[] = [];
+      for (const r of results) {
+        images.push(...r.data.images);
+        missing.push(...r.data.missing);
+      }
+      return { images, missing };
     },
     /** Download via the server proxy (avoids CORS / dead-link issues). */
     async download(image: StockImage): Promise<void> {

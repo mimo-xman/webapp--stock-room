@@ -291,6 +291,32 @@ export function ImageDetailDialog({
     metaScrollRef.current?.scrollTo({ top: 0 });
   }, [image?._id]);
 
+  // ── fresh data on open / image switch ──
+  // The dialog is rendered from the grid snapshot for the first paint, then
+  // silently re-reads the image from the DB (GET /api/images/:id) — reads
+  // never trust cached state. A mutation during the read bumps mutationSeq
+  // so the response is discarded instead of clobbering the newer DB state.
+  const mutationSeq = useRef(0);
+  useEffect(() => {
+    const id = image?._id;
+    if (!id) return;
+    const seq = mutationSeq.current;
+    let alive = true;
+    api.images
+      .get(id)
+      .then((res) => {
+        if (!alive || seq !== mutationSeq.current || res.data._id !== id) return;
+        onImageUpdate(res.data);
+      })
+      .catch(() => {
+        /* silent — the snapshot stays until the next mutation/open */
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onImageUpdate is a page-level callback
+  }, [image?._id]);
+
   // Reset the transient states when the dialog switches to another image
   // (adjust-state-during-render pattern — same as FilterBar).
   if (image && prevId !== image._id) {
@@ -316,6 +342,7 @@ export function ImageDetailDialog({
     if (!image) return;
     // New state: reactivate when paused (absent field = active).
     const next = image.active === false;
+    mutationSeq.current += 1;
     setBusyStatus(true);
     try {
       const res = await api.images.update(image._id, { active: next });
@@ -336,6 +363,7 @@ export function ImageDetailDialog({
 
   async function dismissError() {
     if (!image) return;
+    mutationSeq.current += 1;
     setBusyDismiss(true);
     try {
       const res = await api.images.update(image._id, { error_message: "" });
@@ -353,6 +381,7 @@ export function ImageDetailDialog({
   async function togglePlatformUsed(platform: PlatformId) {
     if (!image) return;
     const next = image.used?.[platform] !== true;
+    mutationSeq.current += 1;
     setBusyPlatform(platform);
     try {
       const res = await api.images.update(image._id, { used: { [platform]: next } });
@@ -400,6 +429,7 @@ export function ImageDetailDialog({
 
   async function deleteUpscale(u: Upscale) {
     if (!image) return;
+    mutationSeq.current += 1;
     setBusyUpscaleId(u._id);
     try {
       await api.images.upscales.remove(image._id, u._id);

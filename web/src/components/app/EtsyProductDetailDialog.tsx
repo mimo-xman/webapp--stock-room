@@ -120,6 +120,33 @@ export function EtsyProductDetailDialog({
     metaScrollRef.current?.scrollTo({ top: 0 });
   }, [navKey]);
 
+  // ── fresh data on open / product switch ──
+  // The dialog renders from the grid snapshot for the first paint, then
+  // silently re-reads the product from the DB (GET /api/etsy-products/:id)
+  // — reads never trust cached state. A mutation during the read bumps
+  // mutationSeq so the response is discarded instead of clobbering the
+  // newer DB state.
+  const mutationSeq = useRef(0);
+  useEffect(() => {
+    const pid = product?._id;
+    if (!pid) return;
+    const seq = mutationSeq.current;
+    let alive = true;
+    api.etsyProducts
+      .get(pid)
+      .then((res) => {
+        if (!alive || seq !== mutationSeq.current || res.data._id !== pid) return;
+        onProductUpdate(res.data);
+      })
+      .catch(() => {
+        /* silent — the snapshot stays until the next mutation/open */
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onProductUpdate is a page-level callback
+  }, [product?._id]);
+
   // ← / → switch images while the dialog is open. The listener is re-attached
   // on every render so the closures stay fresh after each image switch.
   const canNavigate = images.length > 1;
@@ -172,6 +199,7 @@ export function EtsyProductDetailDialog({
 
   async function toggleListed() {
     const next = !product!.used_in_etsy;
+    mutationSeq.current += 1;
     setBusyStamp(true);
     try {
       const res = await api.etsyProducts.update(product!._id, { used_in_etsy: next });
@@ -192,6 +220,7 @@ export function EtsyProductDetailDialog({
   async function toggleActive() {
     if (!image?._id) return;
     const next = image.active === false;
+    mutationSeq.current += 1;
     setBusyStatus(true);
     try {
       const res = await api.etsyProducts.images.update(product!._id, image._id, { active: next });
@@ -212,6 +241,7 @@ export function EtsyProductDetailDialog({
 
   async function dismissError() {
     if (!image?._id) return;
+    mutationSeq.current += 1;
     setBusyDismiss(true);
     try {
       const res = await api.etsyProducts.images.update(product!._id, image._id, { error_message: "" });
@@ -258,6 +288,7 @@ export function EtsyProductDetailDialog({
 
   async function deleteUpscale(u: Upscale) {
     if (!image?._id) return;
+    mutationSeq.current += 1;
     setBusyUpscaleId(u._id);
     try {
       await api.etsyProducts.upscales.remove(product!._id, image._id, u._id);

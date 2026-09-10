@@ -310,15 +310,44 @@ continue page 2, etc. « Deselect » retire les catégories cochées de la page 
 un « Clear everything » pour vider toute la sélection d'un coup. La barre flottante expose
 alors **Mark N as used** et **Unmark N as used** : chacun ouvre **une popup de choix de
 plateformes** (toutes les marketplaces en checkboxes, **rien coché par défaut**, avec le
-compte d'images concernées par plateforme) — on coche où le lot est publié et **un seul
+compte d'images concernées par plateforme). **À l'ouverture, la popup relit toute la
+sélection depuis la base** (`POST /api/images/bulk-fetch`) — les compteurs `[N TO MARK]` /
+`[N MARKED]` sont toujours l'état DB, jamais un cache. En mode mark, une plateforme avec
+**[0 TO MARK]** est désactivée (tout est déjà marqué — un no-op) ; en mode unmark, une
+plateforme avec **[0 MARKED]** est désactivée. On coche où le lot est publié et **un seul
 clic tamponne toute la sélection d'un coup**, via `POST /api/images/bulk-used` (**une seule
-requête**, `platforms` + `image_ids`, lignes mises à jour en place, cibles disparues
-signalées au lieu d'échouer). Le mode unmark propose aussi **« Clear everything »** —
-efface toutes les plateformes de toute la sélection en un clic. **Le tampon s'applique aux
-ORIGINAUX de la sélection** : les upscales n'ont pas d'état « used » propre (elles suivent
-leur original, automatiquement) ; si la sélection ne contient que des upscales, les deux
-boutons sont désactivés et la barre l'explique — la sélection continue d'alimenter l'export
-CSV, où chaque variante devient sa propre ligne.
+requête**, `platforms` + `image_ids`, lignes mises à jour en place avec le doc frais, cibles
+disparues signalées au lieu d'échouer) — **mark** pose les drapeaux choisis à `true` (les
+images déjà marquées sont **ignorées et restent marquées**, la réponse distingue
+`changed`/`marked`), **unmark** les repasse à `false`. Le mode unmark propose aussi
+**« Clear everything »** — efface toutes les plateformes de toute la sélection en un clic.
+**Le tampon s'applique aux ORIGINAUX de la sélection** : les upscales n'ont pas d'état
+« used » propre (elles suivent leur original, automatiquement) ; si la sélection ne contient
+que des upscales, les deux boutons sont désactivés et la barre l'explique — la sélection
+continue d'alimenter l'export CSV, où chaque variante devient sa propre ligne.
+
+### 7bis. Toujours les données fraîches + état dans l'URL (webapp)
+
+**Jamais de données en cache pour la lecture** : chaque vue interroge la base au moment où
+elle s'affiche.
+
+- **Filtre/tri/recherche/pagination** → requête serveur à chaque changement (le filtrage
+  est 100 % côté API, jamais en mémoire webapp).
+- **Ouverture d'une carte image / produit** → le dialogue relit le document depuis la base
+  (`GET /api/images/:id`, `GET /api/etsy-products/:id`) juste après le premier rendu, et
+  chaque mutation renvoie le doc frais qui remplace la ligne entière.
+- **Popup plateformes (mark/unmark)** → la sélection est relue via `bulk-fetch` (compteurs
+  à jour, assets supprimés signalés).
+- **Export CSV** → les lignes sont relues de la base avant la construction (un asset
+  supprimé depuis la sélection est ignoré et signalé dans le toast).
+- **Après chaque modification** → la réponse API (doc frais) remplace la ligne en place,
+  et les en-têtes (session) se rafraîchissent.
+
+**L'état des listes vit dans l'URL** : `/images?page=2&sort=used&category=Food`,
+`/sessions/abc?search=birthday&ep_page=3` (la liste produits d'une session utilise le
+préfixe `ep_`). Recharger la page, partager le lien ou naviguer **Back/Forward** restaure
+exactement la même vue (les changements discrets créent une entrée d'historique ; la
+frappe d'une recherche fusionne en une seule).
 
 **Cartes produits Etsy** (pages *Etsy* et *Session*) — le bouton ZIP ouvre la popup
 « Download all as ZIP » : `origin images` · `upscale images (x2)` · `upscale images (x4)` ·

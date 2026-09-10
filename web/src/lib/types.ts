@@ -240,12 +240,23 @@ export interface ApiErrorPayload {
 
 // ── bulk mark-as-used (webapp checkbox multi-selection) ─────────────────────
 
-/** POST /api/images/bulk-used result — `marked` images were stamped on the
- *  chosen platforms; the updated image docs (for in-place grid patches —
- * their upscales carry the propagated used_in_adobe_stock) and any targets
- * that no longer exist. */
+/** POST /api/images/bulk-used result — `marked` images were processed (found
+ *  and answered), `changed` had at least one used flag actually flip
+ *  (already-marked targets are skipped and stay marked); the updated image
+ *  docs (for in-place grid patches — their upscales carry the propagated
+ *  used_in_adobe_stock) and any targets that no longer exist. */
 export interface BulkUsedResult {
   marked: number;
+  changed: number;
+  images: StockImage[];
+  missing: { image_id: string }[];
+}
+
+/** POST /api/images/bulk-fetch result — the FRESH docs of every selected
+ *  image (request order), plus the ids that no longer exist. The webapp
+ *  re-reads the selection from the DB before acting on it (platform-picker
+ *  stats, CSV build) — the grid snapshot is never trusted for reads. */
+export interface BulkFetchResult {
   images: StockImage[];
   missing: { image_id: string }[];
 }

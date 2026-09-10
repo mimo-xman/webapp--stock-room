@@ -24,7 +24,13 @@ import type { EtsyProduct } from "@/lib/types";
 
 export default function EtsyPage() {
   const { toast } = useToast();
-  const list = useList((p) => api.etsyProducts.list(p));
+  // URL sync: the whole list state lives in the page URL
+  // (/etsy?page=2&product_type=coloring_book&used_in_etsy=true…).
+  const list = useList(
+    (p) => api.etsyProducts.list(p),
+    undefined,
+    { filterKeys: ["session_id", "product_type", "used_in_etsy"] },
+  );
   const sessionOptions = useSessionOptions();
 
   const [detail, setDetail] = useState<EtsyProduct | null>(null);
@@ -59,11 +65,7 @@ export default function EtsyPage() {
   function handleProductUpdate(updated: EtsyProduct) {
     setDetail((d) => (d && d._id === updated._id ? updated : d));
     setEditing((e) => (e && e._id === updated._id ? updated : e));
-    list.patchLocal(updated._id, {
-      used_in_etsy: updated.used_in_etsy,
-      metadata: updated.metadata,
-      images: updated.images,
-    });
+    list.patchLocal(updated._id, updated); // full fresh doc — DB state, in place
   }
 
   function handleSaved(saved: EtsyProduct) {

@@ -452,7 +452,8 @@ async function update(req, res, next) {
  * Upscale variants have no used state of their own: each image's upscales
  * follow it — used.adobe_stock is propagated onto every variant. Idempotent
  * per target; unknown targets are reported in `missing` instead of failing
- * the whole batch.
+ * the whole batch. `changed` counts the images whose used flags actually
+ * flipped (already-marked targets are skipped and stay marked).
  */
 async function bulkUsed(req, res, next) {
   try {
@@ -462,6 +463,7 @@ async function bulkUsed(req, res, next) {
     const images = [];
     const missing = [];
     let marked = 0;
+    let changed = 0;
 
     for (const imageId of image_ids) {
       const image = await Image.findById(imageId);
@@ -470,31 +472,67 @@ async function bulkUsed(req, res, next) {
         continue;
       }
 
-      const current = { ...emptyUsed(), ...(image.used || {}) };
+      const before = { ...emptyUsed(), ...(image.used || {}) };
       let next;
       if (platformSet.size > 0) {
-        next = { ...current };
+        next = { ...before };
         for (const platform of platformSet) next[platform] = used;
       } else {
-        next = used ? { ...current, adobe_stock: true } : emptyUsed();
+        next = used ? { ...before, adobe_stock: true } : emptyUsed();
       }
-      image.used = next;
 
-      // upscales follow their original: propagate the Adobe Stock flag onto
-      // every variant (they are the same image, only bigger).
-      if (Array.isArray(image.upscales)) {
-        const adobeUsed = next.adobe_stock === true;
-        for (const upscale of image.upscales) {
-          upscale.used_in_adobe_stock = adobeUsed;
+      // already in the wanted state on every chosen platform → the flags
+      // stay untouched (the skip the webapp asks for: marked images stay
+      // marked). Legacy docs whose upscales predate the inheritance still
+      // get their variants aligned with the original.
+      const flagsChanged = STOCK_PLATFORM_IDS.some((p) => (before[p] === true) !== (next[p] === true));
+      const adobeUsedNext = next.adobe_stock === true;
+      const upscalesNeedSync =
+        Array.isArray(image.upscales) &&
+        image.upscales.some((u) => u.used_in_adobe_stock !== adobeUsedNext);
+      if (flagsChanged || upscalesNeedSync) {
+        if (flagsChanged) image.used = next;
+        // upscales follow their original: propagate the Adobe Stock flag onto
+        // every variant (they are the same image, only bigger).
+        if (upscalesNeedSync) {
+          for (const upscale of image.upscales) {
+            upscale.used_in_adobe_stock = adobeUsedNext;
+          }
         }
+        await image.save(); // pre('save') keeps used_count in sync
+        if (flagsChanged) changed += 1;
       }
-
-      await image.save(); // pre('save') keeps used_count in sync
       marked += 1;
       images.push(toPlain(image));
     }
 
-    res.json({ data: { marked, images, missing } });
+    res.json({ data: { marked, changed, images, missing } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/images/bulk-fetch
+ * Fresh-from-the-DB read for the webapp multi-selection: the platform
+ * picker popup (mark/unmark stats) and the CSV export re-read every
+ * selected image BEFORE acting — the grid snapshot is never trusted for
+ * reads. Body { image_ids: [] } (max 200 per call) →
+ * { data: { images: [fresh docs in request order], missing: [{ image_id }] } }.
+ */
+async function bulkFetch(req, res, next) {
+  try {
+    const { image_ids = [] } = req.validated;
+    const docs = await Image.find({ _id: { $in: image_ids } });
+    const byId = new Map(docs.map((d) => [String(d._id), d]));
+    const images = [];
+    const missing = [];
+    for (const id of image_ids) {
+      const doc = byId.get(String(id));
+      if (doc) images.push(toPlain(doc));
+      else missing.push({ image_id: String(id) });
+    }
+    res.json({ data: { images, missing } });
   } catch (err) {
     next(err);
   }
@@ -825,6 +863,7 @@ module.exports = {
   getOne,
   update,
   bulkUsed,
+  bulkFetch,
   remove,
   download,
   addUpscale,

@@ -23,7 +23,7 @@ import type { Session } from "@/lib/types";
 export default function SessionsPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const list = useList((p) => api.sessions.list(p));
+  const list = useList((p) => api.sessions.list(p), undefined, { filterKeys: [] });
   const [createOpen, setCreateOpen] = useState(false);
   const [toDelete, setToDelete] = useState<Session | null>(null);
 
