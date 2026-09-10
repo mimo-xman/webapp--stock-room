@@ -92,7 +92,11 @@ export type PlatformMetadata = {
 
 export type PlatformUsed = Partial<Record<PlatformId, boolean>>;
 
-/** One Real-ESRGAN upscale variant on an image (see docs/UPSCALE.md). */
+/** One Real-ESRGAN upscale variant on an image (see docs/UPSCALE.md).
+ *  `used_in_adobe_stock` is DERIVED: an upscale is the same image as its
+ *  original (only bigger), so it follows the original's used state — the
+ *  API propagates used.adobe_stock onto every variant whenever the image
+ *  is stamped, and there is no per-variant mark-used anymore. */
 export interface Upscale {
   _id: string;
   url: string;
@@ -104,6 +108,7 @@ export interface Upscale {
   size_bytes?: number;
   source?: "github-actions" | "manual";
   run_id?: string;
+  /** Mirrors the parent image's used.adobe_stock (derived, read-only). */
   used_in_adobe_stock?: boolean;
   created_at?: string;
 }
@@ -235,13 +240,14 @@ export interface ApiErrorPayload {
 
 // ── bulk mark-as-used (webapp checkbox multi-selection) ─────────────────────
 
-/** POST /api/images/bulk-used result — `marked` items were stamped; the
- *  updated image docs (for in-place grid patches) and any targets that no
- *  longer exist. */
+/** POST /api/images/bulk-used result — `marked` images were stamped on the
+ *  chosen platforms; the updated image docs (for in-place grid patches —
+ * their upscales carry the propagated used_in_adobe_stock) and any targets
+ * that no longer exist. */
 export interface BulkUsedResult {
   marked: number;
   images: StockImage[];
-  missing: { image_id: string; upscale_id?: string }[];
+  missing: { image_id: string }[];
 }
 
 // ── stuck worker claims (in_use reservations left by force-stopped runs) ──

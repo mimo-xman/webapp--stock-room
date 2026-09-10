@@ -16,7 +16,6 @@ const {
   imageClaimSchema,
   imageReleaseSchema,
   upscaleCreateSchema,
-  upscaleUpdateSchema,
   etsyProductCreateSchema,
   etsyProductUpdateSchema,
   etsyProductAddImageSchema,
@@ -74,7 +73,8 @@ router.post('/api/images', validate(imageCreateSchema), imageController.create);
 router.get('/api/images/all', imageController.listAll);
 // Parallel batch workers: atomically reserve the oldest eligible image.
 router.post('/api/images/claim', validate(imageClaimSchema), imageController.claim);
-// Webapp multi-selection: stamp many images / upscale variants at once.
+// Webapp multi-selection: stamp many images at once, on the platforms
+// chosen in the popup (upscales follow their original — no per-variant stamps).
 router.post('/api/images/bulk-used', validate(imageBulkUsedSchema), imageController.bulkUsed);
 router.get('/api/images/:id', imageController.getOne);
 router.patch('/api/images/:id', validate(imageUpdateSchema), imageController.update);
@@ -83,9 +83,9 @@ router.delete('/api/images/:id', imageController.remove);
 router.get('/api/images/:id/download', imageController.download);
 
 // image upscales (Real-ESRGAN derivatives — registered by GitHub Actions,
-// managed from the webapp: mark used / download / delete)
+// managed from the webapp: download / delete. No PATCH route: an upscale
+// has no "used" state of its own, it follows its original image.)
 router.post('/api/images/:id/upscales', validate(upscaleCreateSchema), imageController.addUpscale);
-router.patch('/api/images/:id/upscales/:upscaleId', validate(upscaleUpdateSchema), imageController.updateUpscale);
 router.delete('/api/images/:id/upscales/:upscaleId', imageController.removeUpscale);
 router.get('/api/images/:id/upscales/:upscaleId/download', imageController.downloadUpscale);
 
@@ -111,9 +111,9 @@ router.delete('/api/etsy-products/:id/images/:imageId', etsyProductController.re
 router.post('/api/etsy-products/:id/images/:imageId/release', validate(imageReleaseSchema), etsyProductController.releaseImage);
 router.get('/api/etsy-products/:id/images/:imageId/download', etsyProductController.downloadImage);
 
-// etsy image upscales (Real-ESRGAN derivatives — same protocol as the images)
+// etsy image upscales (Real-ESRGAN derivatives — same protocol as the
+// images; no PATCH route: an upscale follows its original image)
 router.post('/api/etsy-products/:id/images/:imageId/upscales', validate(upscaleCreateSchema), etsyProductController.addUpscale);
-router.patch('/api/etsy-products/:id/images/:imageId/upscales/:upscaleId', validate(upscaleUpdateSchema), etsyProductController.updateUpscale);
 router.delete('/api/etsy-products/:id/images/:imageId/upscales/:upscaleId', etsyProductController.removeUpscale);
 router.get('/api/etsy-products/:id/images/:imageId/upscales/:upscaleId/download', etsyProductController.downloadUpscale);
 

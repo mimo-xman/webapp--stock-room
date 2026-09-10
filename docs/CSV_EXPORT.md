@@ -77,8 +77,11 @@ On `/images` and `/sessions/:id`:
    README §7.
 2. **Pagination-proof selection** — changing pages, filters or sorting does
    **not** clear the selection: a floating bar at the bottom shows
-   `N selected` at all times, with **two** consumers: the CSV export below and
-   the bulk **Mark N as used** stamp (`POST /api/images/bulk-used`).
+   `N selected` at all times, with **three** consumers: the CSV export below
+   and the bulk **Mark N as used / Unmark N as used** stamps (platform-picker
+   popup, then `POST /api/images/bulk-used` — the stamps act on the
+   **originals** of the selection only; upscales follow their original
+   image, but they still feed the CSV export row by row).
 3. **Download CSV** — the button on the floating bar opens the **platform picker
    dialog**: every marketplace is listed with its status (`CSV ready` /
    `coming soon`) and its AI-content policy badge. Clicking a ready platform builds
@@ -109,7 +112,8 @@ On `/images` and `/sessions/:id`:
 | `web/src/lib/csv.ts` | Pure builders: `buildAdobeStockCsv`, `buildShutterstockCsv`, `buildDreamstimeCsv`, `build123RfCsv`, `buildPond5Csv` + `buildPlatformCsv` dispatcher + download |
 | `web/src/components/app/CsvPlatformDialog.tsx` | The platform picker dialog (status chips, AI-policy badges, coming-soon toast) |
 | `web/src/hooks/use-csv-selection.ts` | Selection state (`imageId:variantId` keys) living in the page component — survives pagination; `bulkApply` powers the page-scoped Select all / Deselect all |
-| `web/src/components/app/SelectionBar.tsx` | Floating bottom bar (count / Clear / Download CSV / Mark N as used) |
+| `web/src/components/app/SelectionBar.tsx` | Floating bottom bar (count / Clear / Download CSV / Mark + Unmark N as used — opens the platform picker, disabled with an explanation when only upscales are selected) |
+| `web/src/components/app/BulkUsedDialog.tsx` | The mark/unmark platform picker popup (every marketplace as a checkbox row, nothing checked by default, per-platform counts, "Clear everything" shortcut in unmark mode) |
 | `web/src/components/app/BulkSelectPanel.tsx` | Select all / Deselect all bar + category checkboxes (origin / ×2 / ×4, page-scoped) |
 | `web/src/components/app/ImageCard.tsx` | Original-variant checkbox on each card |
 | `web/src/components/app/ImageDetailDialog.tsx` | Per-platform metadata cards + `CSV` toggle per upscale row + original toggle in the footer |

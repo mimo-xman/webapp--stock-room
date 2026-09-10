@@ -391,18 +391,23 @@ async function main() {
     r = await call('POST', `/api/images/${up}/upscales`, { key: API_KEY, body: mkUpscale() });
     ok('11th upscale → 409 (server default cap)', r.status === 409 && r.json.error.code === 'UPSCALE_LIMIT_REACHED');
 
-    // PATCH (mark used / unmark)
+    // PATCH (mark used) — route REMOVED: upscales follow their original image
     r = await call('PATCH', `/api/images/${up}/upscales/${uid1}`, { password: APP_PASSWORD, body: { used_in_adobe_stock: true } });
-    ok('PATCH upscale mark used (app password) → 200', r.status === 200 && r.json.data.upscales.find((u) => u._id === uid1).used_in_adobe_stock === true);
+    ok('PATCH upscale (route removed) → 404', r.status === 404 && r.json.error.code === 'NOT_FOUND', r.json);
 
-    r = await call('PATCH', `/api/images/${up}/upscales/${uid1}`, { password: APP_PASSWORD, body: { used_in_adobe_stock: false } });
-    ok('PATCH upscale unmark → 200', r.status === 200 && r.json.data.upscales.find((u) => u._id === uid1).used_in_adobe_stock === false);
+    // inheritance: stamping the ORIGINAL propagates onto every upscale
+    r = await call('PATCH', `/api/images/${up}`, { password: APP_PASSWORD, body: { used: { adobe_stock: true } } });
+    ok('mark image used on adobe → 200', r.status === 200 && r.json.data.used_in_adobe_stock === true);
+    ok('every upscale inherits used_in_adobe_stock=true',
+      r.json.data.upscales.length === 10 && r.json.data.upscales.every((u) => u.used_in_adobe_stock === true),
+      r.json.data.upscales && r.json.data.upscales.filter((u) => u.used_in_adobe_stock).length);
 
-    r = await call('PATCH', `/api/images/${up}/upscales/000000000000000000000000`, { password: APP_PASSWORD, body: { used_in_adobe_stock: true } });
-    ok('PATCH unknown upscale → 404 UPSCALE_NOT_FOUND', r.status === 404 && r.json.error.code === 'UPSCALE_NOT_FOUND');
+    r = await call('PATCH', `/api/images/${up}`, { password: APP_PASSWORD, body: { used: { dreamstime: true } } });
+    ok('mark used on dreamstime only → adobe kept', r.json.data.used.dreamstime === true && r.json.data.used.adobe_stock === true);
 
-    r = await call('PATCH', `/api/images/${up}/upscales/${uid1}`, { password: APP_PASSWORD, body: {} });
-    ok('PATCH upscale empty body → 400', r.status === 400);
+    r = await call('PATCH', `/api/images/${up}`, { password: APP_PASSWORD, body: { used_in_adobe_stock: false } });
+    ok('unmark adobe → upscales inherit false',
+      r.json.data.used_in_adobe_stock === false && r.json.data.upscales.every((u) => u.used_in_adobe_stock === false));
 
     // listing filters
     r = await call('GET', '/api/images?limit=100&has_upscales=true', K);
@@ -425,6 +430,106 @@ async function main() {
 
     r = await call('GET', '/api/images?limit=100&has_upscales=true&upscales_lt=5', K);
     ok('both upscale filters → 400 (mutually exclusive)', r.status === 400);
+
+    // ── bulk mark-as-used (webapp multi-selection + platform picker) ─────────
+    console.log('─ bulk-used (platforms + upscale inheritance)');
+    const bulkIds = [];
+    for (let i = 0; i < 3; i += 1) {
+      r = await call('POST', '/api/images', {
+        key: API_KEY,
+        body: mkImage(120 + i, s1, { title: `Bulk stamp probe asset ${i}` }),
+      });
+      bulkIds.push(r.json.data._id);
+    }
+    // one upscale on the first image — it must follow its original's stamps
+    r = await call('POST', `/api/images/${bulkIds[0]}/upscales`, {
+      key: API_KEY,
+      body: mkUpscale({ public_id: 'adobe-stock/upscales/bulk_x2', scale: 2, model: 'RealESRGAN_x2plus', width: 2048, height: 2048 }),
+    });
+    ok('bulk probe: x2 upscale registered', r.status === 201 && r.json.data.upscales.length === 1);
+
+    r = await call('POST', '/api/images/bulk-used', {
+      password: APP_PASSWORD,
+      body: { used: true, platforms: ['adobe_stock', 'dreamstime'], image_ids: bulkIds },
+    });
+    ok('bulk mark on 2 platforms → 200, marked=3', r.status === 200 && r.json.data.marked === 3, r.json);
+    ok('both flags set on every image', r.json.data.images.every((d) => d.used.adobe_stock === true && d.used.dreamstime === true));
+    ok('other platforms untouched', r.json.data.images.every((d) => d.used.shutterstock === false));
+    ok('upscale inherits the adobe flag',
+      r.json.data.images.find((d) => d._id === bulkIds[0]).upscales[0].used_in_adobe_stock === true);
+
+    r = await call('POST', '/api/images/bulk-used', {
+      password: APP_PASSWORD,
+      body: { used: true, platforms: ['adobe_stock', 'adobe_stock', 'dreamstime'], image_ids: bulkIds.slice(0, 2) },
+    });
+    ok('duplicated platforms deduped, mark stays additive',
+      r.status === 200 && r.json.data.marked === 2 && r.json.data.images.every((d) => d.used.adobe_stock === true && d.used.dreamstime === true));
+
+    r = await call('POST', '/api/images/bulk-used', {
+      password: APP_PASSWORD,
+      body: { used: false, platforms: ['adobe_stock'], image_ids: bulkIds },
+    });
+    ok('bulk unmark adobe → other platforms kept',
+      r.json.data.images.every((d) => d.used.adobe_stock === false && d.used.dreamstime === true));
+    ok('upscale follows the unmark',
+      r.json.data.images.find((d) => d._id === bulkIds[0]).upscales[0].used_in_adobe_stock === false);
+
+    r = await call('POST', '/api/images/bulk-used', {
+      password: APP_PASSWORD,
+      body: { used: false, image_ids: bulkIds.slice(0, 2) },
+    });
+    ok('legacy unmark without platforms → every flag cleared',
+      r.json.data.images.every((d) => Object.values(d.used).every((v) => v === false)));
+
+    r = await call('POST', '/api/images/bulk-used', {
+      password: APP_PASSWORD,
+      body: { used: true, image_ids: [bulkIds[0]] },
+    });
+    ok('legacy mark without platforms → adobe_stock only (fully-cleared probe)',
+      r.json.data.images.every((d) => d.used.adobe_stock === true && d.used.dreamstime === false));
+
+    r = await call('POST', '/api/images/bulk-used', {
+      key: API_KEY,
+      body: { used: true, platforms: ['wirestock'], image_ids: [...bulkIds, '000000000000000000000000'] },
+    });
+    ok('unknown target → missing reported, others stamped',
+      r.json.data.marked === 3 && r.json.data.missing.length === 1 && r.json.data.missing[0].image_id === '000000000000000000000000');
+
+    r = await call('POST', '/api/images/bulk-used', {
+      password: APP_PASSWORD,
+      body: { used: true, image_ids: bulkIds, upscales: [{ image_id: bulkIds[0], upscale_id: uid1 }] },
+    });
+    ok('legacy upscales targets rejected loudly → 400', r.status === 400 && r.json.error.code === 'VALIDATION_ERROR', r.json);
+
+    r = await call('POST', '/api/images/bulk-used', {
+      password: APP_PASSWORD,
+      body: { used: true, platforms: ['ebay'], image_ids: bulkIds },
+    });
+    ok('unknown platform → 400', r.status === 400);
+
+    r = await call('POST', '/api/images/bulk-used', {
+      password: APP_PASSWORD,
+      body: { used: true, platforms: [], image_ids: bulkIds },
+    });
+    ok('empty platforms array → 400', r.status === 400);
+
+    r = await call('POST', '/api/images/bulk-used', {
+      password: APP_PASSWORD,
+      body: { used: true, platforms: ['adobe_stock'] },
+    });
+    ok('no image_ids → 400', r.status === 400);
+
+    r = await call('POST', '/api/images/bulk-used', { body: { used: true, image_ids: bulkIds } });
+    ok('bulk-used without credentials → 401', r.status === 401);
+    // this 401 re-arms the brute-force guard (the failed-auth counter is
+    // still above badAuthMax in the window) — let the block expire before
+    // the download-proxy section, exactly like the auth suite does.
+    await new Promise((res) => setTimeout(res, 500));
+
+    // cleanup: bulk probes
+    for (const id of bulkIds) {
+      await call('DELETE', `/api/images/${id}`, { password: APP_PASSWORD });
+    }
 
     // download upscale (proxy)
     const dlUp = await fetch(`${BASE}/api/images/${up}/upscales/${uid1}/download`, { headers: { 'X-API-Key': API_KEY } });
@@ -714,8 +819,8 @@ async function main() {
     r = await call('PATCH', `/api/etsy-products/${ep1}/images/${ec3}/upscales/${eUpscaleId}`, {
       password: APP_PASSWORD, body: { used_in_adobe_stock: true },
     });
-    ok('etsy updateUpscale mark used → 200',
-      r.status === 200 && r.json.data.images.find((im) => im._id === ec3).upscales[0].used_in_adobe_stock === true,
+    ok('etsy PATCH upscale (route removed) → 404',
+      r.status === 404 && r.json.error.code === 'NOT_FOUND',
       { status: r.status, body: JSON.stringify(r.json).slice(0, 200) });
 
     // download proxies (the cover points at the fake local image server)

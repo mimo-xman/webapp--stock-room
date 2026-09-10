@@ -4,7 +4,8 @@ Guide complet de la fonctionnalité « upscale » du projet : les images génér
 (1K/2K) sont agrandies avec **Real-ESRGAN** par des jobs GitHub Actions,
 uploadées sur **Cloudinary**, et enregistrées sur le document image dans
 MongoDB (`upscales[]`). La webapp les affiche avec les actions
-**Mark used / Download / Delete**.
+**Download / Delete** (et un tampon dérivé de l'original — une variante
+n'a plus d'état « used » propre, voir plus bas).
 
 Depuis la séparation des deux métiers, la fonctionnalité couvre **les deux
 collections** avec la même machine (claim atomique → Real-ESRGAN → Cloudinary
@@ -30,7 +31,8 @@ l'API Render en même temps.
 │  error_message   │      │  → upload → POST → release    │     └─────────────┘
 └──────────────────┘      │ (tuiles aussi parallèles)    │
         ▲                 └───────────────────────────────┘
-        │ PATCH (webapp : Active/Pause, dismiss erreur, Mark used, Delete)
+        │ PATCH (webapp : Active/Pause, dismiss erreur, Mark used sur
+        │      l'original — propagé aux variantes, Delete variante)
 ┌──────────────────┐
 │ webapp (Netlify) │  → preview Original / ×N, download (proxy API)
 └──────────────────┘
@@ -227,7 +229,8 @@ Chaque variante est ajoutée par le job via `POST /api/images/:id/upscales` :
       "size_bytes": 8123456,
       "source": "github-actions",  // ou "manual"
       "run_id": "9876543210",      // run GitHub Actions (traçabilité)
-      "used_in_adobe_stock": false, // Mark used par variante
+      "used_in_adobe_stock": false, // DÉRIVÉ : miroir de used.adobe_stock de
+                                     // l'original (mise à jour automatique)
       "created_at": "2026-09-04T07:00:31Z"
     }
   ]
@@ -283,9 +286,13 @@ Champs de coordination des workers parallèles (voir §2.1.1) :
 | `POST` | `/api/images/claim` | **Réservation atomique** d'une image éligible (upscales < max, `active`, pas déjà réservée — ou réservation stale) par le worker parallèle. Body : `max_upscales?`, `stale_minutes?` (défaut 30). Réponse `{ data: <image \| null>, claimed }` — `data: null` = rien à réclamer, le worker s'arrête |
 | `POST` | `/api/images/:id/release` | **Fin de tentative** — body `{ status: "ok" \| "stopped" \| "error", error_message? }` (cf. §2.1.1). Idempotent (404 si l'image a disparu entre-temps) |
 | `POST` | `/api/images/:id/upscales` | Enregistrer une variante (job GH). Body : `url`, `scale` (2-8), `model`, `public_id?`, `width?`, `height?`, `size_bytes?`, `source?`, `run_id?`, `max_upscales?` → **409 `UPSCALE_LIMIT_REACHED`** si le compte atteint la limite (celle du body, sinon `MAX_UPSCALES_PER_IMAGE`, plafond absolu 10) |
-| `PATCH` | `/api/images/:id/upscales/:upscaleId` | « Mark used » d'une variante — body `{ "used_in_adobe_stock": true }` |
 | `DELETE` | `/api/images/:id/upscales/:upscaleId` | Supprimer la variante (+ destruction Cloudinary si configurée — best effort, jamais bloquante) |
 | `GET` | `/api/images/:id/upscales/:upscaleId/download` | Télécharger la variante (proxy serveur, nommage `<slug>_<id>_x4.png`) |
+
+Pas de route `PATCH /api/images/:id/upscales/:upscaleId` : une variante n'a
+pas d'état « used » propre — **elle suit son image originale**. Tamponner
+l'original (`PATCH /api/images/:id` avec `used`, ou le stamp webapp) propage
+`used.adobe_stock` sur toutes ses variantes, automatiquement.
 
 `PATCH /api/images/:id` accepte aussi les champs de coordination webapp :
 `{ "active": true|false }` (réactiver/mettre en pause) et
@@ -301,8 +308,7 @@ Champs de coordination des workers parallèles (voir §2.1.1) :
 | `PATCH` | `/api/etsy-products/:id/images/:imageId` | Edition webapp d'une image de produit — `{ role?, caption?, image_link?, active?, error_message? }` |
 | `DELETE` | `/api/etsy-products/:id/images/:imageId` | Retirer l'image du produit (+ destruction Cloudinary best-effort de ses upscales ; refus 409 `LAST_IMAGE` sur la dernière image) |
 | `GET` | `/api/etsy-products/:id/images/:imageId/download` | Proxy de téléchargement de l'image (nommage `<slug-produit>-<slug-page>`) |
-| `POST` | `/api/etsy-products/:id/images/:imageId/upscales` | Enregistrer une variante sur cette image — 409 à la limite |
-| `PATCH` | `/api/etsy-products/:id/images/:imageId/upscales/:upscaleId` | « Mark used » d'une variante |
+| `POST` | `/api/etsy-products/:id/images/:imageId/upscales` | Enregistrer une variante sur cette image — 409 à la limite. Pas de PATCH par variante (même règle d'héritage : la variante suit son image) |
 | `DELETE` | `/api/etsy-products/:id/images/:imageId/upscales/:upscaleId` | Supprimer la variante (+ destruction Cloudinary best effort) |
 | `GET` | `/api/etsy-products/:id/images/:imageId/upscales/:upscaleId/download` | Télécharger la variante (proxy) |
 
@@ -335,15 +341,21 @@ réservations avec leur âge → bouton **Tout libérer**.
 - **Détail d'une image** : section *Upscales (n)* — chaque variante affiche
   ×scale, modèle, dimensions, taille, date, run, et les actions
   **View** (bascule la preview sur la variante), **Download** (proxy),
-  **Cloudinary** (lien direct), **Mark used** (tampon par variante),
-  **Delete** (confirmation — l'original n'est jamais touché).
+  **Cloudinary** (lien direct), **Delete** (confirmation — l'original n'est
+  jamais touché). **Pas de « Mark used » par variante** : une upscale est la
+  même image que son original, elle **suit l'état used de l'original** sur
+  chaque plateforme (chip « used — follows original » quand l'original est
+  marqué) ; le tampon se pose sur l'original, l'API le propage.
 - Le sélecteur de variantes sous la preview permet de basculer
-  **Original / ×4 / ×2…** ; le tampon affiché correspond à la variante vue.
+  **Original / ×4 / ×2…** ; le tampon affiché est celui de **l'original**
+  (identique quelle que soit la variante prévisualisée).
 - **Détail d'un produit Etsy** : même système — visionneuse image par image
   (boutons préc/suiv + touches ←/→), **métadonnées Etsy du produit et infos
   de l'image courante à droite**, et le **même sélecteur de variantes sous la
   preview** (Original / ×N de l'image courante, section *Upscales* avec les
-  mêmes actions View / Download / Cloudinary / Mark used / Delete). Bannières
+  mêmes actions View / Download / Cloudinary / Delete — même règle : pas de
+  stamp par variante, une chip « listed product » apparaît quand le produit
+  est marqué listé). Bannières
   *claimée par un worker* et *erreur d'upscale* (avec dismiss + pause/
   réactivation) identiques, **par image de produit**. Les `_id` du produit et
   de l'image courante sont affichés avec boutons de copie — c'est ce qu'il

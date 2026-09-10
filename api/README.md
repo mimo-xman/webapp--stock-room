@@ -46,15 +46,14 @@ authentications per IP are counted and blocked (brute-force guard).
 | GET | `/api/images/all` | **every image in one call** — agent dedup check before generating a new batch (lean fields; `?with_links=1` adds `image_link` + `upscales`; newest first, capped at 5000 with `truncated` flag) | ✔ |
 | POST | `/api/images` | register an image (full metadata, validated) | ✔ |
 | POST | `/api/images/claim` | **parallel batch worker** — atomically reserve the oldest eligible image (upscales < `max_upscales`, active, not in use — or claim older than `stale_minutes`, default 30). Body `{ max_upscales?, stale_minutes? }` → `{ data: image \| null, claimed }`; `data: null` = nothing left, the worker stops | ✔ |
-| POST | `/api/images/bulk-used` | **webapp multi-selection** — stamp many images and/or upscale variants in ONE request. Body `{ used: true\|false, image_ids?: [], upscales?: [{ image_id, upscale_id }] }` (max 200 each) → `{ data: { marked, images[], missing[] } }`; `used: true` marks Adobe Stock, `used: false` clears every platform | ✔ |
+| POST | `/api/images/bulk-used` | **webapp multi-selection** — stamp many images in ONE request, on the platforms chosen in the popup. Body `{ used: true\|false, platforms?: [adobe_stock, shutterstock, …], image_ids: [] }` (max 200 images, platforms max one of each) → `{ data: { marked, images[], missing[] } }`; with `platforms` only those flags flip, without them `used: true` marks Adobe Stock and `used: false` clears every platform. Upscale variants follow their original image automatically (no per-variant targets — the API propagates `used.adobe_stock` onto every variant) | ✔ |
 | POST | `/api/images/:id/release` | batch worker reports the attempt outcome — `{ status: ok \| stopped \| error, error_message? }`: `ok` clears the error, `stopped` only frees the claim, `error` pauses the image (`active: false`) + records `error_message` | ✔ |
 | GET | `/api/images/:id` | one image (incl. its `upscales[]`) | ✔ |
 | PATCH | `/api/images/:id` | edit any metadata field(s) (e.g. `used_in_adobe_stock`, `active`, `error_message`) | ✔ |
 | DELETE | `/api/images/:id` | delete one image | ✔ |
 | GET | `/api/images/:id/download` | download the image (server-side proxy, `Content-Disposition`) | ✔ |
 | POST | `/api/images/:id/upscales` | register an upscaled variant (Real-ESRGAN job) — body `{ url, scale, model, public_id?, width?, height?, size_bytes?, source?, run_id?, max_upscales? }` → 409 `UPSCALE_LIMIT_REACHED` when the image already holds `max_upscales` entries | ✔ |
-| PATCH | `/api/images/:id/upscales/:upscaleId` | mark a variant used/unused (`{ "used_in_adobe_stock": true }`) | ✔ |
-| DELETE | `/api/images/:id/upscales/:upscaleId` | delete a variant (+ Cloudinary destroy when `CLOUDINARY_*` env vars are set — best-effort) | ✔ |
+| DELETE | `/api/images/:id/upscales/:upscaleId` | delete a variant (+ Cloudinary destroy when `CLOUDINARY_*` env vars are set — best-effort). No PATCH route: a variant has no "used" state of its own — it follows its original image | ✔ |
 | GET | `/api/images/:id/upscales/:upscaleId/download` | download a variant (proxied) | ✔ |
 
 Sessions are intentionally **not editable** — the product lets the owner modify images only.

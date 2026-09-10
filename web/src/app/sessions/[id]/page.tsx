@@ -31,13 +31,14 @@ import { useList, useSessionOptions } from "@/hooks/use-list";
 import { useCsvSelection } from "@/hooks/use-csv-selection";
 import { api, ApiError } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import { IMAGE_SORTS } from "@/lib/constants";
+import { IMAGE_SORTS, PLATFORMS } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { SelectionBar } from "@/components/app/SelectionBar";
 import { BulkSelectPanel } from "@/components/app/BulkSelectPanel";
+import { BulkUsedDialog } from "@/components/app/BulkUsedDialog";
 import { EtsyZipDialog } from "@/components/app/EtsyZipDialog";
 import { CsvPlatformDialog } from "@/components/app/CsvPlatformDialog";
-import type { Session, StockImage, EtsyProduct } from "@/lib/types";
+import type { Session, StockImage, EtsyProduct, PlatformId } from "@/lib/types";
 
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -70,6 +71,8 @@ export default function SessionDetailPage() {
   const [confirmDeleteSession, setConfirmDeleteSession] = useState(false);
   const [thunk, setThunk] = useState(0);
   const [bulkBusy, setBulkBusy] = useState(false);
+  /** Platform picker popup (opened by the SelectionBar's stamp buttons). */
+  const [bulkMode, setBulkMode] = useState<"mark" | "unmark" | null>(null);
   const [zipProduct, setZipProduct] = useState<EtsyProduct | null>(null);
   const [zipDialogOpen, setZipDialogOpen] = useState(false);
 
@@ -179,20 +182,17 @@ export default function SessionDetailPage() {
     setCsvDialogOpen(true);
   }
 
-  /** Bulk "Mark as used" for the checkbox multi-selection: originals stamp
-   *  their image (Adobe Stock, the primary), upscales stamp their variant —
-   *  ONE request for the whole selection, rows patched in place, selection
-   *  cleared when the stamp lands. */
-  async function bulkMarkUsed() {
-    const items = csvSel.list;
-    if (items.length === 0 || bulkBusy) return;
+  /** Bulk mark/unmark for the checkbox multi-selection — the SelectionBar's
+   *  stamp buttons open the platform picker popup (BulkUsedDialog), then the
+   *  confirm sends ONE request for the whole batch. Only the ORIGIN images
+   *  are stamped: upscale variants follow their original image (the API
+   *  propagates the Adobe Stock flag onto every variant). */
+  async function bulkStampUsed(used: boolean, platforms?: PlatformId[]) {
+    const image_ids = csvSel.list.filter((it) => !it.upscale).map((it) => it.image._id);
+    if (image_ids.length === 0 || bulkBusy) return;
     setBulkBusy(true);
-    const image_ids = items.filter((it) => !it.upscale).map((it) => it.image._id);
-    const upscales = items
-      .filter((it) => it.upscale)
-      .map((it) => ({ image_id: it.image._id, upscale_id: it.upscale!._id }));
     try {
-      const res = await api.images.bulkUsed({ used: true, image_ids, upscales });
+      const res = await api.images.bulkUsed({ used, platforms, image_ids });
       for (const doc of res.data.images) {
         list.patchLocal(doc._id, {
           used: doc.used,
@@ -203,13 +203,21 @@ export default function SessionDetailPage() {
       }
       setThunk((t) => t + 1);
       refreshSessionHeader(); // the header shows the session's usedCount
+      const platformNames = platforms?.map((p) => PLATFORMS.find((d) => d.id === p)?.label ?? p).join(", ");
       toast({
-        title: "Marked as used",
-        description: `${res.data.marked} asset${res.data.marked === 1 ? "" : "s"} stamped in one click — the selection was cleared.${
-          res.data.missing.length > 0 ? ` ${res.data.missing.length} target(s) no longer exist and were skipped.` : ""
-        }`,
+        title: used ? "Marked as used" : "Unmarked as used",
+        description: used
+          ? `${res.data.marked} image${res.data.marked === 1 ? "" : "s"} stamped on ${platformNames} — upscales follow their original — the selection was cleared.${
+              res.data.missing.length > 0 ? ` ${res.data.missing.length} image(s) no longer exist and were skipped.` : ""
+            }`
+          : platforms
+            ? `${res.data.marked} image${res.data.marked === 1 ? "" : "s"} unmarked from ${platformNames} — the selection was cleared.${
+                res.data.missing.length > 0 ? ` ${res.data.missing.length} image(s) no longer exist and were skipped.` : ""
+              }`
+            : `Every platform flag cleared on ${res.data.marked} image${res.data.marked === 1 ? "" : "s"} — the selection was cleared.`,
       });
       csvSel.clear();
+      setBulkMode(null);
     } catch (e: unknown) {
       const msg = (e as { payload?: { message?: string } })?.payload?.message || "The bulk stamp was not applied.";
       toast({ variant: "destructive", title: "Bulk update failed", description: msg });
@@ -386,8 +394,10 @@ export default function SessionDetailPage() {
 
         <SelectionBar
           count={csvSel.count}
-          marking={bulkBusy}
-          onMarkUsed={bulkMarkUsed}
+          originCount={csvSel.list.filter((it) => !it.upscale).length}
+          busy={bulkBusy}
+          onMarkUsed={() => setBulkMode("mark")}
+          onUnmarkUsed={() => setBulkMode("unmark")}
           onDownload={downloadCsv}
           onClear={csvSel.clear}
         />
@@ -459,6 +469,16 @@ export default function SessionDetailPage() {
           <PaginationBar pagination={productList.pagination} onChange={productList.updateParams} />
         </section>
       </main>
+
+      <BulkUsedDialog
+        open={bulkMode !== null}
+        onOpenChange={(open) => !open && setBulkMode(null)}
+        mode={bulkMode ?? "mark"}
+        items={csvSel.list}
+        busy={bulkBusy}
+        onConfirm={(platforms) => bulkStampUsed(bulkMode === "unmark", platforms)}
+        onClearAll={() => bulkStampUsed(false)}
+      />
 
       <CsvPlatformDialog
         open={csvDialogOpen}

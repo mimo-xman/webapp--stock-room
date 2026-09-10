@@ -115,7 +115,7 @@ les vérifie) + une entrée dans `web/src/lib/prompts.ts`.
 | Chemin | Contenu | Hébergement |
 |---|---|---|
 | `api/` | API Node.js + Express + Mongoose (**images_to_bay** avec métadonnées par plateforme + flags `used` par plateforme, **etsy_products** : produits digitaux multi-images — livrable (cover/page/asset/preview) **+ images d'annonce (`role: "marketing"`)** + métadonnées de fiche Etsy + **gestion par image** (PATCH/DELETE par image, claim/release atomiques pour les workers d'upscale), Sessions, auth double, validation zod par plateforme, rate limit, pagination/search/filter/sort backend, proxy download, cascade delete, **upscales** : endpoints + filtres + cap serveur, **`GET /api/images/all`** : toute la librairie en un appel pour l'anti-doublons de l'agent, **`api/scripts/migrate-to-multiplatform.cjs`** : migration de l'ancien schéma plat (génère les `_id` des images), **`api/scripts/backfill-etsy-image-ids.cjs`** : répare les `_id` manquants des produits migrés) | **Render** (runtime Node) |
-| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images/**Etsy** avec **détail de session affichant les DEUX : images + produits Etsy**, badges « N img · N Etsy products · N used », **boutons Add image / Add Etsy product**, popups de détail **spécifiques par type** (popup image pour les images à vendre, popup produit image-par-image avec métadonnées à droite + bascule original/upscales pour les produits), **formulaire complet d'édition des produits Etsy** (métadonnées + gestion des images : rôle, caption, suppression, ajout), tampons « Used » par plateforme, copy icons, modales custom, **navigation prev/next en boucle dans le détail**, **affichage des upscales**, **export CSV multi-plateformes avec sélecteur de plateforme** (Adobe Stock, Shutterstock, Dreamstime, 123RF, Pond5 — formats officiels ; iStock/Wirestock/Depositphotos = coming soon), **cartes de métadonnées par plateforme dans le détail + onglets par plateforme dans le formulaire**, **statut batch**, **page « Agent prompts »** : switcher multi-prompts + variables partagées + validation → prompt généré copiable/téléchargeable en .md, **sélection en masse Select all / Deselect all par catégories** (origin/x2/x4, aucune case cochée par défaut, s'accumule page après page) + **tampon « Mark N as used » en un clic** (une seule requête API), **ZIP produit Etsy complet** (popup origin/×2/×4/metadata, construit et streamé côté API + `metadata.txt`), **jeu d'icônes complet** : `icon.svg` + `apple-icon.png` + `favicon.ico` « SR ») | **Cloudflare Workers** (ou Netlify) |
+| `web/` | WebApp Next.js 16 (password gate, pages Sessions/Images/**Etsy** avec **détail de session affichant les DEUX : images + produits Etsy**, badges « N img · N Etsy products · N used », **boutons Add image / Add Etsy product**, popups de détail **spécifiques par type** (popup image pour les images à vendre, popup produit image-par-image avec métadonnées à droite + bascule original/upscales pour les produits), **formulaire complet d'édition des produits Etsy** (métadonnées + gestion des images : rôle, caption, suppression, ajout), tampons « Used » par plateforme, copy icons, modales custom, **navigation prev/next en boucle dans le détail**, **affichage des upscales**, **export CSV multi-plateformes avec sélecteur de plateforme** (Adobe Stock, Shutterstock, Dreamstime, 123RF, Pond5 — formats officiels ; iStock/Wirestock/Depositphotos = coming soon), **cartes de métadonnées par plateforme dans le détail + onglets par plateforme dans le formulaire**, **statut batch**, **page « Agent prompts »** : switcher multi-prompts + variables partagées + validation → prompt généré copiable/téléchargeable en .md, **sélection en masse Select all / Deselect all par catégories** (origin/x2/x4, aucune case cochée par défaut, s'accumule page après page) + **tampons « Mark N as used » / « Unmark N as used » en un clic via popup de choix de plateformes** (une seule requête API, originaux seulement — les upscales suivent leur original), **ZIP produit Etsy complet** (popup origin/×2/×4/metadata, construit et streamé côté API + `metadata.txt`), **jeu d'icônes complet** : `icon.svg` + `apple-icon.png` + `favicon.ico` « SR ») | **Cloudflare Workers** (ou Netlify) |
 | `prompts/` | **Les prompts réutilisables** à donner à l'agent — un `.md` par type de mission (variables à remplacer + partie sous la ligne ✂ CUT) | — |
 | `AGENT_PROMPT.md` | Index des prompts + mode d'emploi | — |
 | `.github/workflows/` | **Jobs d'upscale Real-ESRGAN** : batch quotidien 08:00 Maroc (images à vendre) + **batch quotidien 10:00 Maroc des images de produits Etsy (cover, pages ET images d'annonce)** + job manuel image unique (réveil auto de l'API Render, logs heartbeat, sortie JPEG prête à vendre) | **GitHub Actions** |
@@ -259,7 +259,9 @@ Les images générées en 1K/2K sont agrandies (×2/×4) par **Real-ESRGAN** dan
   (même sémantique release : succès efface l'erreur, échec met l'image en pause).
 
 Dans la webapp : section *Upscales* dans le détail d'une image — preview commutable
-Original/×N et actions **Mark used / Download / Delete** par variante, chip `×n` sur les
+Original/×N et actions **Download / Delete** par variante (**plus de « Mark used » par
+variante** : une upscale est la même image que son original, elle **suit l'état used de
+l'original** — l'API propage le tampon sur toutes les variantes), chip `×n` sur les
 cartes, filtre « With/Without upscales ». **Statut des workers** : badges `upscaling` /
 `inactive` + chip `error` sur les cartes, bannière d'erreur avec **Dismiss**, bouton
 **Active/Paused** et filtre Status (Active / Paused (failed)) sur la page Images. **Badge
@@ -282,8 +284,9 @@ lien mort.
 Sur les pages *Images* et *Session* : sélectionne les assets voulus — **originaux et/ou leurs
 upscales** — via les checkboxes (carte = original ; détail = original + chaque variante), ou en
 masse avec la barre **Select all / Deselect all** (voir §7). La sélection **survit aux
-changements de pages/filtres** (barre flottante en bas) et alimente **deux actions** : le
-tampon **« Mark N as used » en masse** (§7) et l'export CSV. Le bouton **Download CSV** ouvre
+changements de pages/filtres** (barre flottante en bas) et alimente **trois actions** :
+les tampons **« Mark N as used » / « Unmark N as used » en masse** (§7) et l'export CSV.
+Le bouton **Download CSV** ouvre
 **une popup de choix de plateforme** : chaque marketplace y
 apparaît avec son statut (CSV prêt / coming soon) et son badge de politique IA. Cliquer sur
 une plateforme génère le CSV **dans SON format officiel** — Adobe Stock
@@ -305,10 +308,17 @@ sur la page courante). « Select » applique les catégories cochées à **toute
 courante** ; la sélection **s'accumule d'une page à l'autre** — sélectionne tout page 1,
 continue page 2, etc. « Deselect » retire les catégories cochées de la page courante, avec
 un « Clear everything » pour vider toute la sélection d'un coup. La barre flottante expose
-alors **Mark N as used** : **un seul clic** tamponne toute la sélection — les originaux
-marquent leur image (Adobe Stock, la plateforme primaire), les upscales marquent leur
-variante — via `POST /api/images/bulk-used` (**une seule requête**, lignes mises à jour en
-place, cibles disparues signalées au lieu d'échouer).
+alors **Mark N as used** et **Unmark N as used** : chacun ouvre **une popup de choix de
+plateformes** (toutes les marketplaces en checkboxes, **rien coché par défaut**, avec le
+compte d'images concernées par plateforme) — on coche où le lot est publié et **un seul
+clic tamponne toute la sélection d'un coup**, via `POST /api/images/bulk-used` (**une seule
+requête**, `platforms` + `image_ids`, lignes mises à jour en place, cibles disparues
+signalées au lieu d'échouer). Le mode unmark propose aussi **« Clear everything »** —
+efface toutes les plateformes de toute la sélection en un clic. **Le tampon s'applique aux
+ORIGINAUX de la sélection** : les upscales n'ont pas d'état « used » propre (elles suivent
+leur original, automatiquement) ; si la sélection ne contient que des upscales, les deux
+boutons sont désactivés et la barre l'explique — la sélection continue d'alimenter l'export
+CSV, où chaque variante devient sa propre ligne.
 
 **Cartes produits Etsy** (pages *Etsy* et *Session*) — le bouton ZIP ouvre la popup
 « Download all as ZIP » : `origin images` · `upscale images (x2)` · `upscale images (x4)` ·

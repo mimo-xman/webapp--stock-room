@@ -16,6 +16,11 @@
  * pagination, so the owner can select all on page 1, continue to page 2 and
  * keep accumulating — deselecting works the same way, page by page, plus a
  * "clear everything" escape hatch in the deselect panel.
+ *
+ * Note: the bulk mark/unmark-as-used of the SelectionBar acts on the ORIGIN
+ * images of the selection only — upscales have no used state of their own
+ * (they follow their original). Upscales in the selection still feed the CSV
+ * export, where each variant becomes its own row.
  */
 
 import { useState } from "react";
@@ -101,9 +106,12 @@ export function BulkSelectPanel({ images, page, onApply, onClearAll }: BulkSelec
           <ListX className="h-3.5 w-3.5" aria-hidden />
           Deselect all
         </button>
-        <span className="ml-auto font-mono text-[10.5px] text-ink-muted">
+        <span
+          className="ml-auto max-w-xs font-mono text-[10.5px] leading-snug text-ink-muted md:text-right"
+          title="The bulk Mark / Unmark as used of the selection bar acts on origin images — upscales follow their original"
+        >
           applies to the {images.length} image{images.length === 1 ? "" : "s"} of page {page} — the
-          selection follows you across pages
+          selection follows you across pages · mark as used stamps the origins
         </span>
       </div>
 

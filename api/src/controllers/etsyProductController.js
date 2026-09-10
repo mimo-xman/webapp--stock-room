@@ -651,30 +651,10 @@ async function addUpscale(req, res, next) {
 }
 
 /**
- * PATCH /api/etsy-products/:id/images/:imageId/upscales/:upscaleId
- * Update one upscale entry (webapp "Mark used" stamp).
+ * PATCH /api/etsy-products/:id/images/:imageId/upscales/:upscaleId — REMOVED.
+ * Upscale variants have no "used" state of their own: they follow their
+ * original image (see the stock-image side — update()/bulkUsed()).
  */
-async function updateUpscale(req, res, next) {
-  try {
-    assertIds(req.params.id, req.params.imageId, req.params.upscaleId);
-    const { product, image } = await loadProductImage(req.params.id, req.params.imageId);
-
-    const upscale = image.upscales && image.upscales.id(req.params.upscaleId);
-    if (!upscale) {
-      throw new HttpError(
-        404,
-        'UPSCALE_NOT_FOUND',
-        `Upscale ${req.params.upscaleId} does not exist on image ${req.params.imageId} — it may have been deleted already`
-      );
-    }
-
-    Object.assign(upscale, req.validated);
-    await product.save();
-    res.json({ data: toPlain(product) });
-  } catch (err) {
-    next(err);
-  }
-}
 
 /**
  * DELETE /api/etsy-products/:id/images/:imageId/upscales/:upscaleId
@@ -1017,7 +997,6 @@ module.exports = {
   downloadImage,
   downloadZip,
   addUpscale,
-  updateUpscale,
   removeUpscale,
   downloadUpscale,
 };

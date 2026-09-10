@@ -6,8 +6,11 @@
  * marketplace with its title/description/categories/keywords + copy buttons +
  * per-platform "used" stamp), download, edit, delete. Upscaled variants
  * (Real-ESRGAN via GitHub Actions) are listed in the metadata column with
- * per-variant mark-used / download / delete actions. Optional looping
- * prev/next navigation (arrows + ←/→ keys) across the page's image list.
+ * per-variant download / delete actions — they have NO stamp of their own:
+ * an upscale is the same image as its original, so it follows the original's
+ * used state on every platform (the preview stamp and the row chip show it).
+ * Optional looping prev/next navigation (arrows + ←/→ keys) across the page's
+ * image list.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -304,7 +307,9 @@ export function ImageDetailDialog({
 
   const previewSrc = activeUpscale ? activeUpscale.url : image.image_link;
   const anyUsed = (image.used_count ?? 0) > 0 || Object.values(image.used ?? {}).some(Boolean);
-  const stampVisible = activeUpscale ? Boolean(activeUpscale.used_in_adobe_stock) : anyUsed;
+  // Upscales follow their original image: the stamp shows whenever the
+  // original is used somewhere, whichever variant is being previewed.
+  const stampVisible = anyUsed;
   const displayTitle = image.title || image.metadata?.adobe_stock?.title || "Untitled";
 
   async function toggleActive() {
@@ -390,26 +395,6 @@ export function ImageDetailDialog({
       toast({ variant: "destructive", title: "Download failed", description: msg });
     } finally {
       setBusyUpscaleId(null);
-    }
-  }
-
-  async function toggleUpscaleUsed(u: Upscale) {
-    if (!image) return;
-    const next = !u.used_in_adobe_stock;
-
-    // Optimistic update of the parent state, rollback on error.
-    const updated = {
-      ...image,
-      upscales: upscales.map((x) => (x._id === u._id ? { ...x, used_in_adobe_stock: next } : x)),
-    };
-    onImageUpdate(updated);
-    try {
-      const res = await api.images.upscales.update(image._id, u._id, { used_in_adobe_stock: next });
-      onImageUpdate(res.data);
-    } catch (e: unknown) {
-      onImageUpdate(image); // rollback
-      const msg = (e as { payload?: { message?: string } })?.payload?.message || "The stamp was not applied.";
-      toast({ variant: "destructive", title: "Update failed", description: msg });
     }
   }
 
@@ -736,13 +721,15 @@ export function ImageDetailDialog({
                             <ExternalLink className="h-3 w-3" aria-hidden />
                             Cloudinary
                           </a>
-                          <StampToggle
-                            used={Boolean(u.used_in_adobe_stock)}
-                            small
-                            onToggle={() => toggleUpscaleUsed(u)}
-                            className="ml-auto"
-                            label={`Mark the ×${u.scale} variant as used`}
-                          />
+                          {anyUsed && (
+                            <span
+                              className="chip ml-auto border-stamp/60 text-stamp"
+                              title="The original image is marked as used — an upscale is the same image, so it follows the original on every platform"
+                              data-testid="upscale-follows-original"
+                            >
+                              used — follows original
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => setConfirmUpscaleDelete(u)}

@@ -419,6 +419,22 @@ async function update(req, res, next) {
     if (!image) {
       throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
     }
+
+    // Upscales follow their original image: whenever the used flags changed,
+    // propagate used.adobe_stock onto every variant (they are the same image,
+    // only bigger — no per-variant stamp exists anymore).
+    if (patch.used) {
+      const adobeUsed = image.used && image.used.adobe_stock === true;
+      if (
+        Array.isArray(image.upscales) &&
+        image.upscales.some((u) => u.used_in_adobe_stock !== adobeUsed)
+      ) {
+        for (const upscale of image.upscales) {
+          upscale.used_in_adobe_stock = adobeUsed;
+        }
+        await image.save();
+      }
+    }
     res.json({ data: toPlain(image) });
   } catch (err) {
     next(err);
@@ -427,63 +443,54 @@ async function update(req, res, next) {
 
 /**
  * POST /api/images/bulk-used
- * Bulk "Mark as used" for the webapp multi-selection: stamps many images
- * and/or upscale variants in ONE request (used: true → Adobe Stock, the
- * primary platform — exactly like the single-image stamp; used: false →
- * clear every platform). Idempotent per target; unknown targets are
- * reported in `missing` instead of failing the whole batch.
+ * Bulk "Mark as used" for the webapp multi-selection: stamps many images in
+ * ONE request, on the platforms chosen in the webapp popup.
+ *   { used: true,  platforms: [...], image_ids } → those flags true
+ *   { used: false, platforms: [...], image_ids } → those flags false
+ *   (no platforms) — legacy default: used:true → Adobe Stock, used:false →
+ *   clear every platform.
+ * Upscale variants have no used state of their own: each image's upscales
+ * follow it — used.adobe_stock is propagated onto every variant. Idempotent
+ * per target; unknown targets are reported in `missing` instead of failing
+ * the whole batch.
  */
 async function bulkUsed(req, res, next) {
   try {
-    const { used, image_ids = [], upscales = [] } = req.validated;
-
-    // Group the requested targets by parent image — one load + one save per
-    // image even when it carries both the image stamp and several variants.
-    const byImage = new Map();
-    for (const id of image_ids) {
-      const entry = byImage.get(String(id)) || { stampImage: false, upscaleIds: new Set() };
-      entry.stampImage = true;
-      byImage.set(String(id), entry);
-    }
-    for (const target of upscales) {
-      const key = String(target.image_id);
-      const entry = byImage.get(key) || { stampImage: false, upscaleIds: new Set() };
-      entry.upscaleIds.add(String(target.upscale_id));
-      byImage.set(key, entry);
-    }
+    const { used, platforms = [], image_ids = [] } = req.validated;
+    const platformSet = new Set(platforms);
 
     const images = [];
     const missing = [];
     let marked = 0;
 
-    for (const [imageId, plan] of byImage) {
+    for (const imageId of image_ids) {
       const image = await Image.findById(imageId);
       if (!image) {
-        if (plan.stampImage) missing.push({ image_id: imageId });
-        for (const upscaleId of plan.upscaleIds) {
-          missing.push({ image_id: imageId, upscale_id: upscaleId });
-        }
+        missing.push({ image_id: String(imageId) });
         continue;
       }
 
-      if (plan.stampImage) {
-        image.used = used
-          ? { ...emptyUsed(), ...(image.used || {}), adobe_stock: true }
-          : emptyUsed();
-        marked += 1;
+      const current = { ...emptyUsed(), ...(image.used || {}) };
+      let next;
+      if (platformSet.size > 0) {
+        next = { ...current };
+        for (const platform of platformSet) next[platform] = used;
+      } else {
+        next = used ? { ...current, adobe_stock: true } : emptyUsed();
       }
+      image.used = next;
 
-      for (const upscaleId of plan.upscaleIds) {
-        const upscale = image.upscales && image.upscales.id(upscaleId);
-        if (!upscale) {
-          missing.push({ image_id: imageId, upscale_id: upscaleId });
-          continue;
+      // upscales follow their original: propagate the Adobe Stock flag onto
+      // every variant (they are the same image, only bigger).
+      if (Array.isArray(image.upscales)) {
+        const adobeUsed = next.adobe_stock === true;
+        for (const upscale of image.upscales) {
+          upscale.used_in_adobe_stock = adobeUsed;
         }
-        upscale.used_in_adobe_stock = used;
-        marked += 1;
       }
 
       await image.save(); // pre('save') keeps used_count in sync
+      marked += 1;
       images.push(toPlain(image));
     }
 
@@ -686,33 +693,11 @@ async function addUpscale(req, res, next) {
 }
 
 /**
- * PATCH /api/images/:id/upscales/:upscaleId
- * Update one upscale entry (webapp "Mark used" stamp).
- * Body: { used_in_adobe_stock: boolean }
+ * PATCH /api/images/:id/upscales/:upscaleId — REMOVED. Upscale variants have
+ * no "used" state of their own: they follow their original image (stamping
+ * the image propagates used.adobe_stock onto every upscale, both here in
+ * update() and in bulkUsed()).
  */
-async function updateUpscale(req, res, next) {
-  try {
-    const image = await Image.findById(req.params.id);
-    if (!image) {
-      throw new HttpError(404, 'NOT_FOUND', `Image ${req.params.id} does not exist`);
-    }
-
-    const upscale = image.upscales && image.upscales.id(req.params.upscaleId);
-    if (!upscale) {
-      throw new HttpError(
-        404,
-        'UPSCALE_NOT_FOUND',
-        `Upscale ${req.params.upscaleId} does not exist on image ${image._id} — it may have been deleted already`
-      );
-    }
-
-    Object.assign(upscale, req.validated);
-    await image.save();
-    res.json({ data: toPlain(image) });
-  } catch (err) {
-    next(err);
-  }
-}
 
 /**
  * DELETE /api/images/:id/upscales/:upscaleId
@@ -843,7 +828,6 @@ module.exports = {
   remove,
   download,
   addUpscale,
-  updateUpscale,
   removeUpscale,
   downloadUpscale,
 };

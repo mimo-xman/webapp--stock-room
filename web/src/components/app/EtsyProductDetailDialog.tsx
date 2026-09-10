@@ -10,7 +10,7 @@
  *   RIGHT  the product's Etsy listing metadata (description / tags / category
  *          / price / deliverable link) + the CURRENT image's info (role,
  *          caption, prompt, worker banners, per-image upscales with
- *          View / Download / Cloudinary / Mark used / Delete), session.
+ *          View / Download / Cloudinary / Delete), session.
  *
  * Each nested image carries its own upscales + worker fields (in_use /
  * active / error_message) — every banner and action is PER IMAGE, matching
@@ -253,27 +253,6 @@ export function EtsyProductDetailDialog({
       toast({ variant: "destructive", title: "Download failed", description: msg });
     } finally {
       setBusyUpscaleId(null);
-    }
-  }
-
-  async function toggleUpscaleUsed(u: Upscale) {
-    if (!image?._id) return;
-    const next = !u.used_in_adobe_stock;
-
-    // Optimistic update of the parent state, rollback on error.
-    const updated = patchImageIn(product!, image._id, {
-      upscales: upscales.map((x) => (x._id === u._id ? { ...x, used_in_adobe_stock: next } : x)),
-    });
-    onProductUpdate(updated);
-    try {
-      const res = await api.etsyProducts.upscales.update(product!._id, image._id, u._id, {
-        used_in_adobe_stock: next,
-      });
-      onProductUpdate(res.data);
-    } catch (e: unknown) {
-      onProductUpdate(product!); // rollback
-      const msg = (e as { payload?: { message?: string } })?.payload?.message || "The stamp was not applied.";
-      toast({ variant: "destructive", title: "Update failed", description: msg });
     }
   }
 
@@ -621,13 +600,15 @@ export function EtsyProductDetailDialog({
                               <ExternalLink className="h-3 w-3" aria-hidden />
                               Cloudinary
                             </a>
-                            <StampToggle
-                              used={Boolean(u.used_in_adobe_stock)}
-                              small
-                              onToggle={() => toggleUpscaleUsed(u)}
-                              className="ml-auto"
-                              label={`Mark the ×${u.scale} variant as used`}
-                            />
+                            {product.used_in_etsy && (
+                              <span
+                                className="chip ml-auto border-stamp/60 text-stamp"
+                                title="The whole product is listed on Etsy — an upscale is the same image as its original, it has no stamp of its own"
+                                data-testid="etsy-upscale-follows-product"
+                              >
+                                listed product
+                              </span>
+                            )}
                             <button
                               type="button"
                               onClick={() => setConfirmUpscaleDelete(u)}

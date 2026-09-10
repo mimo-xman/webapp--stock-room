@@ -5,7 +5,7 @@
  * A 401 kicks the user back to the gate (password changed or wrong).
  */
 
-import type { ListParams, ListResponse, Session, StockImage, Upscale, EtsyProduct, EtsyProductImage, EtsyProductMetadata, EtsyProductType, EtsyImageRole, ApiErrorPayload, ClaimsSnapshot, ClaimsReleaseResult, BulkUsedResult } from "./types";
+import type { ListParams, ListResponse, Session, StockImage, Upscale, EtsyProduct, EtsyProductImage, EtsyProductMetadata, EtsyProductType, EtsyImageRole, ApiErrorPayload, ClaimsSnapshot, ClaimsReleaseResult, BulkUsedResult, PlatformId } from "./types";
 import { getAppPassword, clearAppPassword } from "./auth";
 
 function resolveApiUrl(): string {
@@ -118,12 +118,15 @@ export const api = {
     remove(id: string): Promise<{ data: { deleted: boolean } }> {
       return request(`/api/images/${id}`, { method: "DELETE" });
     },
-    /** Bulk "Mark as used" stamp for the checkbox multi-selection — ONE
-     *  request for many images and/or upscale variants. */
+    /** Bulk mark/unmark-as-used for the checkbox multi-selection — ONE
+     *  request for many images, on the platforms chosen in the popup.
+     *  Upscales follow their original image (no per-variant targets). */
     bulkUsed(payload: {
       used: boolean;
+      /** Chosen platforms — omit to use the legacy default
+       *  (mark → Adobe Stock, unmark → clear every platform). */
+      platforms?: PlatformId[];
       image_ids?: string[];
-      upscales?: { image_id: string; upscale_id: string }[];
     }): Promise<{ data: BulkUsedResult }> {
       return request("/api/images/bulk-used", { method: "POST", body: JSON.stringify(payload) });
     },
@@ -141,15 +144,10 @@ export const api = {
       saveBlob(blob, filenameFrom(image));
     },
 
-    /** Upscaled variants (Real-ESRGAN via GitHub Actions). */
+    /** Upscaled variants (Real-ESRGAN via GitHub Actions) — download /
+     *  delete only: an upscale has no "used" state of its own, it follows
+     *  its original image (stamped at the image level). */
     upscales: {
-      /** Toggle the "Mark used" stamp on one upscaled variant. */
-      update(imageId: string, upscaleId: string, patch: { used_in_adobe_stock: boolean }): Promise<{ data: StockImage }> {
-        return request(`/api/images/${imageId}/upscales/${upscaleId}`, {
-          method: "PATCH",
-          body: JSON.stringify(patch),
-        });
-      },
       /** Delete one variant — the server also destroys the Cloudinary asset
        *  when the API is configured with CLOUDINARY_* env vars. */
       remove(imageId: string, upscaleId: string): Promise<{ data: { deleted: boolean; upscalesRemaining: number; cloudinary?: { destroyed: boolean; note?: string } | null } }> {
@@ -280,16 +278,9 @@ export const api = {
     },
 
     /** Upscaled variants on the nested product images (Real-ESRGAN via
-     *  GitHub Actions — same protocol as the sellable images). */
+     *  GitHub Actions — download / delete only: an upscale follows its
+     *  original image, there is no per-variant stamp). */
     upscales: {
-      /** Toggle the "Mark used" stamp on one variant of a product image. */
-      update(productId: string, imageId: string, upscaleId: string, patch: { used_in_adobe_stock: boolean }): Promise<{ data: EtsyProduct }> {
-        return request(`/api/etsy-products/${productId}/images/${imageId}/upscales/${upscaleId}`, {
-          method: "PATCH",
-          body: JSON.stringify(patch),
-        });
-      },
-
       /** Delete one variant — the server also destroys the Cloudinary asset
        *  when the API is configured with CLOUDINARY_* env vars. */
       remove(productId: string, imageId: string, upscaleId: string): Promise<{ data: { deleted: boolean; upscalesRemaining: number; cloudinary?: { destroyed: boolean; note?: string } | null } }> {

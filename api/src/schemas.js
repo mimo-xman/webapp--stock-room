@@ -225,32 +225,40 @@ const imageUpdateSchema = z
   });
 
 // ── bulk mark-as-used (webapp multi-selection) ─────────────────────────────
-// POST /api/images/bulk-used — stamp many images / upscale variants in ONE
-// request. `used: true` marks Adobe Stock (the primary, like the webapp's
-// single-image stamp); `used: false` clears every platform.
+// POST /api/images/bulk-used — stamp many images in ONE request, on the
+// platforms chosen in the webapp popup. `platforms` picks which flags flip:
+//   { used: true,  platforms: ['adobe_stock','dreamstime'], image_ids } → those flags true
+//   { used: false, platforms: ['shutterstock'], image_ids } → those flags false
+// Omitting `platforms` keeps the legacy default: used:true → Adobe Stock,
+// used:false → clear every platform.
+// Upscale variants have NO used state of their own — they follow their
+// original image (the API propagates used.adobe_stock onto every upscale).
 const BULK_USED_MAX = 200;
 
 const imageBulkUsedSchema = z
   .object({
     used: z.boolean(),
+    platforms: z
+      .array(
+        z.enum(STOCK_PLATFORM_IDS, {
+          errorMap: () => ({
+            message: `platforms entries must be one of: ${STOCK_PLATFORM_IDS.join(', ')}`,
+          }),
+        })
+      )
+      .min(1, 'platforms cannot be empty — omit the field to use the default behavior')
+      .max(STOCK_PLATFORM_IDS.length, `at most ${STOCK_PLATFORM_IDS.length} platforms`)
+      .optional()
+      .transform((ps) => (ps ? [...new Set(ps)] : ps)),
     image_ids: z
       .array(objectId)
       .max(BULK_USED_MAX, `at most ${BULK_USED_MAX} images per bulk update`)
       .optional(),
-    upscales: z
-      .array(
-        z.object({
-          image_id: objectId,
-          upscale_id: objectId,
-        })
-      )
-      .max(BULK_USED_MAX, `at most ${BULK_USED_MAX} upscales per bulk update`)
-      .optional(),
   })
-  .refine(
-    (obj) => (obj.image_ids?.length ?? 0) + (obj.upscales?.length ?? 0) > 0,
-    { message: 'provide at least one image_id or upscale target' }
-  );
+  .strict() // legacy `upscales` targets are rejected loudly (they no longer exist)
+  .refine((obj) => (obj.image_ids?.length ?? 0) > 0, {
+    message: 'provide at least one image_id — upscale variants are stamped through their original image',
+  });
 
 // ── parallel batch workers (claim / release) ──
 // POST /api/images/claim — a batch worker atomically reserves the oldest
@@ -321,14 +329,9 @@ const upscaleCreateSchema = z.object({
     .optional(),
 });
 
-// PATCH /api/images/:id/upscales/:upscaleId — webapp "Mark used" toggle.
-const upscaleUpdateSchema = z
-  .object({
-    used_in_adobe_stock: z.boolean(),
-  })
-  .refine((obj) => Object.keys(obj).length > 0, {
-    message: 'provide at least one field to update',
-  });
+// PATCH /api/images/:id/upscales/:upscaleId — REMOVED: upscale variants have
+// no "used" state of their own anymore; they follow their original image
+// (stamping the image propagates used.adobe_stock onto every upscale).
 
 // ── Etsy products ───────────────────────────────────────────────────────────
 
@@ -463,7 +466,6 @@ module.exports = {
   imageClaimSchema,
   imageReleaseSchema,
   upscaleCreateSchema,
-  upscaleUpdateSchema,
   etsyProductCreateSchema,
   etsyProductUpdateSchema,
   etsyProductAddImageSchema,
