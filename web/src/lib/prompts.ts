@@ -35,6 +35,7 @@ import { BUNDLED_TEMPLATE_COLORING_BOOK_ETSY } from "./prompt-templates/coloring
 import { BUNDLED_TEMPLATE_ACTIVITY_BOOK_ETSY } from "./prompt-templates/activity-book-etsy";
 import { BUNDLED_TEMPLATE_PARTY_INVITATIONS_ETSY } from "./prompt-templates/party-invitations-etsy";
 import { BUNDLED_TEMPLATE_WALL_ART_SET_ETSY } from "./prompt-templates/wall-art-set-etsy";
+import { BUNDLED_TEMPLATE_WALL_ART_SET_ETSY_LOCAL } from "./prompt-templates/wall-art-set-etsy-local";
 import { BUNDLED_TEMPLATE_PRINTABLE_SET_ETSY } from "./prompt-templates/printable-set-etsy";
 import { BUNDLED_TEMPLATE_CLIPART_BUNDLE_ETSY } from "./prompt-templates/clipart-bundle-etsy";
 import { BUNDLED_TEMPLATE_DIGITAL_DOWNLOAD_ETSY } from "./prompt-templates/digital-download-etsy";
@@ -72,10 +73,18 @@ export interface PromptDefinition {
   /** Small chip shown on the switcher card + result header. */
   purpose: string;
   /** Icon key resolved by the page (keeps this file icon-free). */
-  icon: "sparkles" | "store" | "book" | "puzzle" | "mail" | "frame" | "clipboard" | "shapes" | "download";
+  icon: "sparkles" | "store" | "book" | "puzzle" | "mail" | "frame" | "server" | "clipboard" | "shapes" | "download";
   /** prompts/<file> on GitHub raw. */
   file: string;
   bundled: string;
+  /**
+   * Connection variables shown in the "Connection" section. Defaults to the six
+   * shared vars; a prompt whose mission uses a different wiring (e.g. the local
+   * engine variants: no hosted image API URL/key — the agent clones the repo and
+   * runs the server itself) overrides this with its own subset (reusing the same
+   * storage keys so the values stay shared and prefilled).
+   */
+  sharedVars?: PromptVar[];
   /** Mission-specific variables (the shared six are appended on top). */
   specificVars: PromptVar[];
 }
@@ -140,6 +149,26 @@ export const SHARED_VARS: PromptVar[] = [
 ];
 
 // ── the registry ───────────────────────────────────────────────────────────
+
+// The local-engine variants drop the hosted image API URL + key (the agent
+// launches the server itself) and promote the Zazo repo link from "backup" to
+// clone source. The storage keys are REUSED (imageRepoUrl / assetApiUrl /
+// assetApiKey / assetRepoUrl), so values saved once still prefill the local
+// prompt's form.
+const LOCAL_ENGINE_SHARED_VARS: PromptVar[] = [
+  {
+    key: "imageRepoUrl",
+    token: "[ZAZO IMAGE STUDIO REPO LINK]",
+    label: "Zazo Image Studio — repo the agent clones & runs",
+    help: "The agent clones this project, configures its .env and runs the server locally — no hosted image API.",
+    placeholder: "https://github.com/mimo-xman/webapp--zazo-image-studio",
+    type: "url",
+    required: true,
+  },
+  ...SHARED_VARS.filter(
+    (v) => v.key === "assetApiUrl" || v.key === "assetApiKey" || v.key === "assetRepoUrl"
+  ),
+];
 
 export const PROMPTS: PromptDefinition[] = [
   {
@@ -264,6 +293,72 @@ export const PROMPTS: PromptDefinition[] = [
     ],
   },
   {
+    id: "wall-art-set-etsy-local",
+    title: "Wall art set — Etsy — LOCAL engine",
+    tagline: "Same wall art set mission, but the agent CLONES the Zazo Image Studio repo, configures YOUR Cloudinary + MongoDB values in its .env, launches the server locally and drives its API routes at http://localhost — every image lands in YOUR Cloudinary, every job in YOUR MongoDB.",
+    purpose: "etsy · local",
+    icon: "server",
+    file: "prompts/wall-art-set-etsy-local.md",
+    bundled: BUNDLED_TEMPLATE_WALL_ART_SET_ETSY_LOCAL,
+    sharedVars: LOCAL_ENGINE_SHARED_VARS,
+    specificVars: [
+      {
+        key: "numberOfPrints",
+        token: "[NUMBER OF ART PRINTS]",
+        label: "Number of art prints",
+        help: "How many matching prints the set contains (each prints at 8×10 in / A4 or larger; the announcement images are extra — at least 4). The style + theme are NOT typed here — the agent researches Etsy's current demand and picks them itself, always a NON-LIVING theme (botanicals, abstracts, landscapes, typography…).",
+        placeholder: "6",
+        type: "number",
+        required: true,
+      },
+      {
+        key: "cloudinaryCloudName",
+        token: "[CLOUDINARY_CLOUD_NAME]",
+        label: "Local engine .env — CLOUDINARY_CLOUD_NAME",
+        help: "The local engine uploads every generated image to this Cloudinary — its permanent public URL is what Stock Room registers.",
+        placeholder: "dnmre2q5g",
+        type: "text",
+        required: true,
+      },
+      {
+        key: "cloudinaryApiKey",
+        token: "[CLOUDINARY_API_KEY]",
+        label: "Local engine .env — CLOUDINARY_API_KEY",
+        help: "The Cloudinary API key, written into the engine's .env by the agent.",
+        placeholder: "123456789012345",
+        type: "secret",
+        required: true,
+      },
+      {
+        key: "cloudinaryApiSecret",
+        token: "[CLOUDINARY_API_SECRET]",
+        label: "Local engine .env — CLOUDINARY_API_SECRET",
+        help: "The Cloudinary API secret, written into the engine's .env by the agent.",
+        placeholder: "f3x…",
+        type: "secret",
+        required: true,
+      },
+      {
+        key: "mongodbUri",
+        token: "[MONGODB_URI]",
+        label: "Local engine .env — MONGODB_URI",
+        help: "The MongoDB where the local engine stores its job records — the run is durable, not trapped in the sandbox.",
+        placeholder: "mongodb+srv://user:pass@cluster.mongodb.net",
+        type: "secret",
+        required: true,
+      },
+      {
+        key: "mongoDbName",
+        token: "[MONGO_DB_NAME]",
+        label: "Local engine .env — MONGO_DB_NAME",
+        help: "Database name, separate from the URI.",
+        placeholder: "zazo-image-studio",
+        type: "text",
+        required: true,
+      },
+    ],
+  },
+  {
     id: "printable-set-etsy",
     title: "Printable set — Etsy",
     tagline: "A functional printable system (chore charts, planners, trackers, bingo, gift tags…) + ANNOUNCEMENT images — usable layouts, perfect spelling, the agent researches the niche and designs the set itself, decorated with NON-LIVING accents only.",
@@ -329,9 +424,9 @@ export function getPrompt(id: string): PromptDefinition | undefined {
   return PROMPTS.find((p) => p.id === id);
 }
 
-/** All variables of a prompt: shared six first, then mission-specific. */
+/** All variables of a prompt: its connection vars first, then mission-specific. */
 export function promptVars(prompt: PromptDefinition): PromptVar[] {
-  return [...SHARED_VARS, ...prompt.specificVars];
+  return [...(prompt.sharedVars ?? SHARED_VARS), ...prompt.specificVars];
 }
 
 export type PromptValues = Record<string, string>;
@@ -481,7 +576,7 @@ export function renderTemplate(prompt: PromptDefinition, template: string, value
 /** Leftover [BRACKETED] tokens after rendering — template/form drift. */
 export function findUnreplacedTokens(rendered: string): string[] {
   const found = new Set<string>();
-  for (const match of rendered.matchAll(/\[[A-Z][A-Z0-9 ./-]{2,}\]/g)) {
+  for (const match of rendered.matchAll(/\[[A-Z][A-Z0-9 ./_-]{2,}\]/g)) {
     found.add(match[0]);
   }
   return [...found];

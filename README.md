@@ -58,6 +58,7 @@ détaillé est dans [`AGENT_PROMPT.md`](AGENT_PROMPT.md)) :
 | [`prompts/activity-book-etsy.md`](prompts/activity-book-etsy.md) | **Activity book Etsy** — pages d'activités line-art pour enfants (**≥ 4 types d'activités mélangés** : labyrinthes, points à relier, tracés, associations, comptages… **puzzles solvables à solution unique** + texte fonctionnel correct) + couverture + images d'annonce i2i ; boucle QC STEP 4c ; thème NON-VIVANT recherché par l'agent | `[NUMBER OF ACTIVITY PAGES]` |
 | [`prompts/party-invitations-etsy.md`](prompts/party-invitations-etsy.md) | **Party invitations Etsy** — set cohérent d'invitations 5×7 à remplir (headline + lignes nommées, **orthographe parfaite exigée**) + images d'annonce i2i (fan du set, close-up, scène de fête) ; occasion + thème recherchés par l'agent, **décorations SANS êtres vivants** (ballons, fusées, fleurs…) | `[NUMBER OF INVITATION DESIGNS]` |
 | [`prompts/wall-art-set-etsy.md`](prompts/wall-art-set-etsy.md) | **Wall art set Etsy** — set de prints assortis UNE palette / UNE ratio / un style (qualité galerie, zéro artefact/banding ; quotes autorisées si parfaitement orthographiées) + annonces i2i (frames stylisés, mockup gallery wall avec les VRAIS prints) ; style + thème recherchés par l'agent, NON-VIVANT | `[NUMBER OF ART PRINTS]` |
+| [`prompts/wall-art-set-etsy-local.md`](prompts/wall-art-set-etsy-local.md) | **Wall art set Etsy — moteur LOCAL** — même mission que wall art set, MAIS l'agent ne consomme pas l'API Zazo hébergée : il CLONE le repo Zazo Image Studio, écrit TES valeurs Cloudinary + MongoDB dans son `.env`, lance le serveur dans SON environnement (STEP 0 : health check + smoke test obligatoires) et pilote ses routes API en `http://localhost` — chaque image générée atterrit dans TON Cloudinary (son URL permanente est la `image_link` enregistrée — jamais une URL localhost), chaque job dans TON MongoDB | `[NUMBER OF ART PRINTS]` + 5 valeurs `.env` (Cloudinary ×3, MongoDB ×2) |
 | [`prompts/printable-set-etsy.md`](prompts/printable-set-etsy.md) | **Printable set Etsy** — système imprimable fonctionnel (chore charts, planners, trackers, bingo, gift tags…) : pages coordonnées **utilisables** (sections alignées, cases réelles, espace d'écriture), texte = produit (zéro faute) + annonces i2i ; niche recherchée par l'agent, accents NON-VIVANTS | `[NUMBER OF PRINTABLE PAGES]` |
 | [`prompts/clipart-bundle-etsy.md`](prompts/clipart-bundle-etsy.md) | **Clipart bundle Etsy** — bundle d'éléments PNG individuels **isolés sur blanc pur** (1 sujet/image, silhouette fermée — le propriétaire détourne en post), UN style/palette pour tout le bundle, usage commercial + annonces i2i (sample sheets avec les VRAIS éléments) ; thème + style recherchés par l'agent, NON-VIVANT | `[NUMBER OF CLIPART ELEMENTS]` |
 | [`prompts/digital-download-etsy.md`](prompts/digital-download-etsy.md) | **Digital download Etsy (générique)** — l'agent recherche quel produit digital se vend MAINTENANT, choisit le produit ET son `product_type` (templates, jeux, ressources éducatives, cartes, sets saisonniers… y compris coloring/activity/invitations/wall art/printable/clipart) et applique les conventions du type ; couvre les types `digital_download` et `other` du filtre /etsy | `[NUMBER OF PRODUCT IMAGES]` |
@@ -97,8 +98,12 @@ décliné N fois.
 
 La webapp (page **Agent prompts**) remplie, valide et exporte ces prompts — les six variables
 de connexion (les 2 URLs + 2 clés + 2 repos) sont partagées entre tous les prompts et
-sauvegardées une fois pour toutes dans le navigateur. Ajouter un 4ᵉ prompt = un fichier
-`.md` dans `prompts/` (avec **les deux blocs de règles** — contenu + distinctivité — le build
+sauvegardées une fois pour toutes dans le navigateur. La variante **moteur local**
+(`wall-art-set-etsy-local`) débranche ce câblage : pas d'URL/clé d'API d'images hébergée —
+le repo Zazo devient la **source de clonage**, et 5 valeurs `.env` (Cloudinary ×3 +
+MongoDB ×2) sont fournies à l'agent ; le champ `sharedVars` du registre gère ce remplacement
+en réutilisant les mêmes clés de stockage. Ajouter un prompt = un fichier `.md` dans
+`prompts/` (avec **les deux blocs de règles** — contenu + distinctivité — le build
 les vérifie) + une entrée dans `web/src/lib/prompts.ts`.
 
 ## Aperçu de la webapp
